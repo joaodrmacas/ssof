@@ -1,0 +1,17 @@
+[
+    {
+      "vulnerability": "Command Injection",
+      "sources": ["req.headers", "readFile"],
+      "sanitizers": ["shell-escape"],
+      "sinks": ["exec", "execSync", "spawnSync", "execFileSync"],
+      "implicit": "no"
+    },
+    {
+      "vulnerability": "DOM XSS",
+      "sources": ["document.referrer", "document.URL", "document.location"],
+      "sanitizers": ["DOMPurify.sanitize"],
+      "sinks": ["document.write", "innerHTML", "setAttribute"],
+      "implicit": "yes"
+    }
+  ]
+  
