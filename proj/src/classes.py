@@ -104,6 +104,113 @@ class MultiLabel:
         return f"MultiLabel(labels={self.labels})"
 
 
+class Policy:
+    def __init__(self, patterns):
+        """
+        Constructor: Initializes the Policy with vulnerability patterns.
+        :param patterns: List of Pattern objects.
+        """
+        self.patterns = patterns
+
+    def get_vulnerability_names(self):
+        """Returns all vulnerability names in the policy."""
+        return [pattern.name for pattern in self.patterns]
+
+    def get_sources(self, name):
+        """Returns vulnerabilities for which the given name is a source."""
+        return [pattern for pattern in self.patterns if pattern.is_source(name)]
+
+    def get_sanitizers(self, name):
+        """Returns vulnerabilities for which the given name is a sanitizer."""
+        return [pattern for pattern in self.patterns if pattern.is_sanitizer(name)]
+
+    def get_sinks(self, name):
+        """Returns vulnerabilities for which the given name is a sink."""
+        return [pattern for pattern in self.patterns if pattern.is_sink(name)]
+
+    def detect_illegal_flows(self, name, multilabel):
+        """
+        Detects illegal flows by checking which part of the multilabel has the given name as a sink.
+        :param name: Name to check for sinks.
+        :param multilabel: MultiLabel object representing flows.
+        :return: MultiLabel with only the illegal flows.
+        """
+        illegal_flows = MultiLabel()
+        for pattern_name, label in multilabel.labels.items():
+            if any(
+                pattern.is_sink(name)
+                for pattern in self.patterns
+                if pattern.name == pattern_name
+            ):
+                illegal_flows.labels[pattern_name] = label
+        return illegal_flows
+
+
+class MultiLabelling:
+    def __init__(self):
+        """
+        Constructor: Initializes the mapping from variable names to MultiLabels.
+        """
+        self.mapping = {}
+
+    def get_multilabel(self, var_name):
+        """
+        Retrieves the MultiLabel assigned to a variable.
+        :param var_name: Variable name.
+        :return: MultiLabel object or None if not assigned.
+        """
+        return self.mapping.get(var_name)
+
+    def update_multilabel(self, var_name, multilabel):
+        """
+        Updates the MultiLabel assigned to a variable.
+        :param var_name: Variable name.
+        :param multilabel: MultiLabel object.
+        """
+        self.mapping[var_name] = multilabel
+
+    def __repr__(self):
+        return f"MultiLabelling(mapping={self.mapping})"
+
+
+class Vulnerabilities:
+    def __init__(self):
+        """
+        Constructor: Initializes the vulnerabilities collection.
+        """
+        self.data = {}
+
+    def add_illegal_flow(self, multilabel, sink_name):
+        """
+        Records illegal flows detected for a sink.
+        :param multilabel: MultiLabel with the sources and sanitizers for illegal flows.
+        :param sink_name: Name of the sink.
+        """
+        for pattern_name, label in multilabel.labels.items():
+            if pattern_name not in self.data:
+                self.data[pattern_name] = []
+            self.data[pattern_name].append(
+                {
+                    "sink": sink_name,
+                    "sources": label.get_sources(),
+                    "sanitizers": {
+                        source: label.get_sanitizers(source)
+                        for source in label.get_sources()
+                    },
+                }
+            )
+
+    def generate_report(self):
+        """
+        Generates a summary report of vulnerabilities.
+        :return: Dictionary of vulnerabilities grouped by pattern.
+        """
+        return self.data
+
+    def __repr__(self):
+        return f"Vulnerabilities(data={self.data})"
+
+
 class Node:
     def __init__(self, identifier, node_type, ast_node, line_num):
         self.identifier = identifier  # Unique identifier for the node
