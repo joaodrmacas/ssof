@@ -4,14 +4,18 @@ def analyze_ast(ast, patterns):
     subpatterns = generate_subpatterns(patterns)
     vulnerabilities = []
 
+
+
     for sp in subpatterns:
         source = sp['source']
         sanitizer = sp['sanitizer']
         sink = sp['sink']
         implicit = sp['implicit']
 
+        
+
         # Find all possible paths in nodes
-        print(paths)
+
 
         # for path in paths:
         #     # Get all sources, sinks and sanitizers in the path
@@ -75,4 +79,4 @@ def generate_subpatterns(patterns):
                         "implicit": implicit
                     })
 
-        return subpatterns_list
+    return subpatterns_list

@@ -4,6 +4,7 @@ from src.parser import parse_javascript
 from src.patterns import load_patterns
 from src.output import create_output
 from src.analyzer import analyze_ast
+from src.classes import FlowGraphBuilder
 
 def main():
     # Check if correct number of arguments
@@ -37,6 +38,15 @@ def main():
         
         # Load patterns
         patterns = load_patterns(pattern_file)
+
+        sources = {source for pattern in patterns for source in pattern['sources']}
+        sinks = {sink for pattern in patterns for sink in pattern['sinks']}
+
+
+        flowGraph = FlowGraphBuilder(sources,sinks,patterns).build(ast)
+        print(flowGraph)
+
+        exit(0)
         
         vulnerabilities = analyze_ast(ast, patterns)
         
@@ -45,6 +55,7 @@ def main():
         
     except Exception as e:
         print(f"Error processing files: {str(e)}")
+        raise e
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -1,28 +1,28 @@
 [
     {
-        "vulnerability": "vuln1",
+        "vulnerability": "A",
         "sources": [
-            ""
+            "b"
         ],
         "sanitizers": [
-            ""
-        ],
-        "sinks": [
             "d"
         ],
-        "implicit": true
+        "sinks": [
+            "h"
+        ],
+        "implicit": "no"
     },
     {
-        "vulnerability": "vuln2",
+        "vulnerability": "B",
         "sources": [
-            "c"
+            "f"
         ],
         "sanitizers": [
-            ""
+            "t"
         ],
         "sinks": [
-            "e"
+            "c"
         ],
-        "implicit": true
+        "implicit": "no"
     }
 ]
