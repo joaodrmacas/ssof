@@ -1,82 +1,104 @@
+from dataclasses import dataclass
+from typing import List, Dict, Set, Optional
 
-def analyze_ast(ast, patterns):
+@dataclass
+class Trace:
+    """Represents a single execution trace through the program."""
+    steps: List[str]
+    
+    def __str__(self) -> str:
+        return " -> ".join(self.steps)
 
-    subpatterns = generate_subpatterns(patterns)
-    vulnerabilities = []
+class ASTAnalyzer:
 
+    def __init__(self, ast):
+        self.ast = ast
 
+    def traverse_ast(self, node=None, depth=0):
+        """
+        Recursively traverses an AST and prints the node type and starting line number.
+        :param node: Current AST node (dictionary or list).
+        :param depth: Current depth in the tree (used for indentation).
+        """
+        if node is None:
+            node = self.ast
 
-    for sp in subpatterns:
-        source = sp['source']
-        sanitizer = sp['sanitizer']
-        sink = sp['sink']
-        implicit = sp['implicit']
+        if isinstance(node, dict):
+            # Print node type and line number
+            node_type = node.get('type')
+            if node_type:
+                loc = node.get('loc', {}).get('start', {}).get('line', 'N/A')
+                print(f"{' ' * depth}- {node_type} (Line: {loc})")
 
-        
+            # Recursively traverse children
+            for _, value in node.items():
+                self.traverse_ast(value, depth + 2)
 
-        # Find all possible paths in nodes
+        elif isinstance(node, list):
+            # Traverse each element in the list
+            for item in node:
+                self.traverse_ast(item, depth)
 
+    def trace_execution_paths(self, node=None, max_repetitions=2):
+        """
+        Traverse an AST and print all possible execution traces. Handles loops by limiting
+        repetitions to a fixed constant.
+        :param node: Current AST node (dictionary or list).
+        :param max_repetitions: Maximum number of loop repetitions to consider.
+        """
+        if node is None:
+            node = self.ast
 
-        # for path in paths:
-        #     # Get all sources, sinks and sanitizers in the path
-        #     sources_in_path = get_contained(path, source)
-        #     sinks_in_path = get_contained(path, sink)
-        #     sanitizers_in_path = get_contained(path, sanitizer)
+        def helper(node, path):
+            if isinstance(node, dict):
+                node_type = node.get('type')
+                if node_type == 'WhileStatement':
+                    condition = node.get('test', {}).get('raw', 'condition')
+                    body = node.get('body', {}).get('body', [])
 
-        #     for source, sink in list(itertools.product(sources_in_path, sinks_in_path)):
-        #         # Get all sources and sinks indexes
-        #         source_indexes = [i for i, x in enumerate(path) if x == source]
-        #         sink_indexes = [i for i, x in enumerate(path) if x == sink]
+                    for i in range(max_repetitions + 1):
+                        path.append(f"WHILE ({condition}) iteration {i}")
+                        for statement in body:
+                            helper(statement, path)
+                        if i < max_repetitions:
+                            path.pop()
+                    path.append(f"EXIT WHILE ({condition})")
 
-        #         # Get all the valid pairs of source -> sink
-        #         source_sink_pairs = flow_pairs(source_indexes, sink_indexes)
+                elif node_type == 'IfStatement':
+                    test = node.get('test', {}).get('raw', 'condition')
+                    path.append(f"IF ({test})")
 
-        #         # Get all the sanitizers between the source -> sink pairs
-        #         sanitizers_in_between = valid_sanitizers(
-        #             sanitizers_in_path, path, source_sink_pairs)
+                    # Traverse the 'consequent' branch
+                    consequent = node.get('consequent', {}).get('body', [])
+                    for statement in consequent:
+                        helper(statement, path)
 
-        #         for (source_index, sink_index) in source_sink_pairs:
-        #             vuln = {
-        #                 "vulnerability": pattern['vulnerability'],
-        #                 "source": path[source_index],
-        #                 "sink": path[sink_index],
-        #                 "sanitizer": sanitizers_in_between
-        #             }
-        #             if vuln not in possible_vulns:
-        #                 possible_vulns.append(vuln)
+                    # Traverse the 'alternate' branch, if present
+                    alternate = node.get('alternate', {}).get('body', [])
+                    if alternate:
+                        path.append("ELSE")
+                        for statement in alternate:
+                            helper(statement, path)
 
-        # # Remove duplicates (same path, same vuln) (hopefully)
-        # possible_vulns = remove_duplicates(possible_vulns)
+                    path.append("END IF")
 
-        # vulnerabilities.append(possible_vulns)
+                else:
+                    path.append(f"NODE: {node_type}")
 
-def get_contained(list1, list2):
-    """
-    A function that returns all communs between 2 litst
-    """
-    return [x for x in list1 for y in list2 if x == y]
+                # Traverse children of generic nodes
+                for key, value in node.items():
+                    if isinstance(value, dict) or isinstance(value, list):
+                        if value and key != 'loc':
+                            helper(value, path)
 
-def generate_subpatterns(patterns):
-    """
-    Generate all possible combinations of sources, sanitizers, and sinks
-    """
-    for pattern in patterns:
-        sources = pattern['sources']
-        sanitizers = pattern['sanitizers']
-        sinks = pattern['sinks']
-        implicit = pattern['implicit']
+            elif isinstance(node, list):
+                for item in node:
+                    helper(item, path)
 
-        subpatterns_list = []
-        
-        # Generate all possible combinations of sources, sanitizers, and sinks
-        for source in sources:
-            for sanitizer in sanitizers:
-                for sink in sinks:
-                    subpatterns_list.append({
-                        "source": source,
-                        "sanitizer": sanitizer,
-                        "sink": sink,
-                        "implicit": implicit
-                    })
+        # Initialize and print paths
+        execution_path = []
+        helper(node, execution_path)
+        print("Execution Trace:")
+        for step in execution_path:
+            print(step)
 
-    return subpatterns_list

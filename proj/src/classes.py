@@ -1,505 +1,368 @@
-from typing import List
+from typing import List, Dict, Set, Optional
+import copy
 
 
 class Pattern:
-    vuln_name = ""
-    source_names = []
-    sanitizer_names = []
-    sink_names = []
-
-    def __init__(
-        self,
-        vuln_name: str,
-        source_names: List[str],
-        sanitizer_names: List[str],
-        sink_names: List[str],
-    ):
-        self.vuln_name = vuln_name
-        self.source_names = source_names
-        self.sanitizer_names = sanitizer_names
-        self.sink_names = sink_names
-
-    def is_source(self, source_name: str):
-        return source_name in self.source_names
-
-    def is_sanitizer(self, sanitizer_name: str):
-        return sanitizer_name in self.sanitizer_names
-
-    def is_sink(self, sink_name: str):
-        return sink_name in self.sink_names
-
-    def __repr__(self):
-        return f"Pattern(name={self.name}, sources={self.sources}, sanitizers={self.sanitizers}, sinks={self.sinks})"
-
+    """
+    Represents a security vulnerability pattern with its sources, sanitizers, and sinks.
+    """
+    def __init__(self, name: str, sources: List[str], sanitizers: List[str], sinks: List[str]):
+        """
+        Initialize a Pattern object.
+        
+        Args:
+            name: Name of the vulnerability
+            sources: List of source function/variable names
+            sanitizers: List of sanitizer function names
+            sinks: List of sink function/variable names
+        """
+        self.name = name
+        self.sources = set(sources)
+        self.sanitizers = set(sanitizers)
+        self.sinks = set(sinks)
+    
+    def get_name(self) -> str:
+        """Return the vulnerability pattern name."""
+        return self.name
+    
+    def get_sources(self) -> Set[str]:
+        """Return the set of sources."""
+        return self.sources
+    
+    def get_sanitizers(self) -> Set[str]:
+        """Return the set of sanitizers."""
+        return self.sanitizers
+    
+    def get_sinks(self) -> Set[str]:
+        """Return the set of sinks."""
+        return self.sinks
+    
+    def is_source(self, name: str) -> bool:
+        """Check if a name is a source in this pattern."""
+        return name in self.sources
+    
+    def is_sanitizer(self, name: str) -> bool:
+        """Check if a name is a sanitizer in this pattern."""
+        return name in self.sanitizers
+    
+    def is_sink(self, name: str) -> bool:
+        """Check if a name is a sink in this pattern."""
+        return name in self.sinks
 
 class Label:
+    """
+    Represents the integrity of information in terms of its sources and applied sanitizers.
+    """
     def __init__(self):
-        self.sources = {}
-        self.sanitizers = {}
-
-    def add_source(self, source):
-        if source not in self.sources:
-            self.sources[source] = []
-
+        """Initialize an empty Label."""
+        # Dictionary mapping source names to sets of sanitizers applied to that source
+        self.source_sanitizers: Dict[str, Set[str]] = {}
+    
+    def add_source(self, source: str):
+        """Add a new source to the label if not already present."""
+        if source not in self.source_sanitizers:
+            self.source_sanitizers[source] = set()
+    
     def add_sanitizer(self, source, sanitizer):
-        if source in self.sources:
-            self.sources[source].append(sanitizer)
+        """
+        Add a sanitizer that intercepts the flow from a specific source.
 
-    def get_sources(self):
-        return list(self.sources.keys())
-
-    def get_sanitizers(self, source):
-        return self.sources.get(source, [])
-
-    def combine(self, other):
+        :param source: The source to which the sanitizer applies.
+        :param sanitizer: The sanitizer to be added.
+        """
+        if source in self.source_sanitizers.keys():
+            self.source_sanitizers[source].update([sanitizer])
+    
+    def get_sources(self) -> Set[str]:
+        """Return all sources in the label."""
+        return set(self.source_sanitizers.keys())
+    
+    def get_sanitizers_for_source(self, source: str) -> Set[str]:
+        """Return sanitizers applied to a specific source."""
+        return self.source_sanitizers.get(source, set())
+    
+    def get_all_sanitizers(self) -> Set[str]:
+        """Return all sanitizers used in this label."""
+        all_sanitizers = set()
+        for sanitizers in self.source_sanitizers.values():
+            all_sanitizers.update(sanitizers)
+        return all_sanitizers
+    
+    def combine(self, other: 'Label') -> 'Label':
+        """
+        Combine this label with another label, creating a new independent label.
+        """
         new_label = Label()
-        new_label.sources = {**self.sources}
-        for source, sanitizers in other.sources.items():
-            if source not in new_label.sources:
-                new_label.sources[source] = []
-            new_label.sources[source].extend(sanitizers)
+        # Copy all sources and their sanitizers from this label
+        for source, sanitizers in self.source_sanitizers.items():
+            new_label.source_sanitizers[source] = sanitizers.copy()
+        
+        # Add all sources and sanitizers from the other label
+        for source, sanitizers in other.source_sanitizers.items():
+            if source not in new_label.source_sanitizers:
+                new_label.source_sanitizers[source] = sanitizers.copy()
+            else:
+                # For shared sources, take the intersection of sanitizers
+                new_label.source_sanitizers[source] &= sanitizers
+        
         return new_label
 
-    def __repr__(self):
-        return f"Label(sources={self.sources})"
-
-
 class MultiLabel:
-    def __init__(self):
-        self.labels = {}
+    """
+    Manages multiple labels for different vulnerability patterns.
+    """
+    def __init__(self, patterns: List[Pattern]):
+        """
+        Initialize MultiLabel with a list of patterns.
+        
+        Args:
+            patterns: List of Pattern objects to track
+        """
+        self.patterns = {pattern.get_name(): pattern for pattern in patterns}
+        self.labels = {pattern.get_name(): Label() for pattern in patterns}
+    
+    def add_source(self, source: str):
+        """
+        Add a source to relevant pattern labels.
+        Only adds to patterns where the source is valid.
+        """
+        for pattern_name, pattern in self.patterns.items():
+            if pattern.is_source(source):
+                self.labels[pattern_name].add_source(source)
 
-    def add_label(self, pattern_name):
-        if pattern_name not in self.labels:
-            self.labels[pattern_name] = Label()
-
-    def add_source(self, pattern_name, source):
-        if pattern_name in self.labels:
-            self.labels[pattern_name].add_source(source)
-
-    def add_sanitizer(self, pattern_name, source, sanitizer):
-        if pattern_name in self.labels:
-            self.labels[pattern_name].add_sanitizer(source, sanitizer)
-
-    def get_sources(self, pattern_name):
-        if pattern_name in self.labels:
-            return self.labels[pattern_name].get_sources()
-        return []
-
-    def get_sanitizers(self, pattern_name, source):
-        if pattern_name in self.labels:
-            return self.labels[pattern_name].get_sanitizers(source)
-        return []
-
-    def combine(self, other):
-        new_multilabel = MultiLabel()
-        for pattern_name, label in self.labels.items():
-            if pattern_name not in new_multilabel.labels:
-                new_multilabel.add_label(pattern_name)
-            new_multilabel.labels[pattern_name] = label.combine(
-                other.labels.get(pattern_name, Label())
+    def add_sanitizer(self, source: str, sanitizer: str):
+        """
+        Add a sanitizer to relevant pattern labels.
+        Only adds to patterns where the source is valid.
+        """
+        for pattern_name, pattern in self.patterns.items():
+            if pattern.is_source(source) and pattern.is_sanitizer(sanitizer):
+                self.labels[pattern_name].add_sanitizer(source, sanitizer)
+    
+    def get_label_for_pattern(self, pattern_name: str):
+        """Get the Label object for a specific pattern."""
+        return self.labels.get(pattern_name)
+    
+    def combine(self, other: 'MultiLabel') -> 'MultiLabel':
+        """
+        Combine this MultiLabel with another MultiLabel.
+        """
+        # Create new MultiLabel with same patterns
+        new_multilabel = MultiLabel(list(self.patterns.values()))
+        
+        # Combine labels for each pattern
+        for pattern_name in self.patterns:
+            new_multilabel.labels[pattern_name] = self.labels[pattern_name].combine(
+                other.labels[pattern_name]
             )
+        
         return new_multilabel
 
-    def __repr__(self):
-        return f"MultiLabel(labels={self.labels})"
-
+#LAB 2
 
 class Policy:
-    def __init__(self, patterns):
+    """
+    Represents an information flow policy that uses patterns to recognize illegal flows.
+    """
+    def __init__(self, patterns: List[Pattern]):
         """
-        Constructor: Initializes the Policy with vulnerability patterns.
-        :param patterns: List of Pattern objects.
+        Initialize a Policy with vulnerability patterns.
+        
+        Args:
+            patterns: List of Pattern objects to be considered
         """
-        self.patterns = patterns
-
-    def get_vulnerability_names(self):
-        """Returns all vulnerability names in the policy."""
-        return [pattern.name for pattern in self.patterns]
-
-    def get_sources(self, name):
-        """Returns vulnerabilities for which the given name is a source."""
-        return [pattern for pattern in self.patterns if pattern.is_source(name)]
-
-    def get_sanitizers(self, name):
-        """Returns vulnerabilities for which the given name is a sanitizer."""
-        return [pattern for pattern in self.patterns if pattern.is_sanitizer(name)]
-
-    def get_sinks(self, name):
-        """Returns vulnerabilities for which the given name is a sink."""
-        return [pattern for pattern in self.patterns if pattern.is_sink(name)]
-
-    def detect_illegal_flows(self, name, multilabel):
+        self.patterns = {pattern.get_name(): pattern for pattern in patterns}
+    
+    def get_vulnerability_names(self) -> Set[str]:
+        """Return all vulnerability pattern names being considered."""
+        return set(self.patterns.keys())
+    
+    def get_vulnerabilities_for_source(self, name: str) -> Set[str]:
         """
-        Detects illegal flows by checking which part of the multilabel has the given name as a sink.
-        :param name: Name to check for sinks.
-        :param multilabel: MultiLabel object representing flows.
-        :return: MultiLabel with only the illegal flows.
+        Return vulnerability names that have the given name as a source.
+        
+        Args:
+            name: Name to check as a source
+        Returns:
+            Set of vulnerability pattern names
         """
-        illegal_flows = MultiLabel()
-        for pattern_name, label in multilabel.labels.items():
-            if any(
-                pattern.is_sink(name)
-                for pattern in self.patterns
-                if pattern.name == pattern_name
-            ):
-                illegal_flows.labels[pattern_name] = label
+        return {
+            pattern_name
+            for pattern_name, pattern in self.patterns.items()
+            if pattern.is_source(name)
+        }
+    
+    def get_vulnerabilities_for_sanitizer(self, name: str) -> Set[str]:
+        """
+        Return vulnerability names that have the given name as a sanitizer.
+        
+        Args:
+            name: Name to check as a sanitizer
+        Returns:
+            Set of vulnerability pattern names
+        """
+        return {
+            pattern_name
+            for pattern_name, pattern in self.patterns.items()
+            if pattern.is_sanitizer(name)
+        }
+    
+    def get_vulnerabilities_for_sink(self, name: str) -> Set[str]:
+        """
+        Return vulnerability names that have the given name as a sink.
+        
+        Args:
+            name: Name to check as a sink
+        Returns:
+            Set of vulnerability pattern names
+        """
+        return {
+            pattern_name
+            for pattern_name, pattern in self.patterns.items()
+            if pattern.is_sink(name)
+        }
+    
+    def check_illegal_flows(self, name: str, multi_label: MultiLabel) -> MultiLabel:
+        """
+        Determine which flows to the given name are illegal based on the multilabel.
+        
+        Args:
+            name: Name to check as potential sink
+            multi_label: MultiLabel describing the information flowing to the name
+        Returns:
+            MultiLabel containing only the illegal flows (patterns where name is a sink)
+        """
+        # Create new MultiLabel with same patterns
+        illegal_flows = MultiLabel([])
+        
+        for pattern_name in self.get_vulnerabilities_for_sink(name):
+            illegal_flows.patterns[pattern_name] = self.patterns[pattern_name] 
+            
+            label = multi_label.get_label_for_pattern(pattern_name)
+            if label != None:
+                illegal_flows.labels[pattern_name] = copy.deepcopy(label)
+        
         return illegal_flows
 
-
 class MultiLabelling:
+    """
+    Represents a mapping from variable names to multilabels.
+    """
+    def __init__(self, patterns: List[Pattern] = []):
+        """
+        Initialize a MultiLabelling object.
+        
+        Args:
+            patterns: List of Pattern objects for creating empty multilabels
+        """
+        self.patterns = patterns
+        self.labelling: Dict[str, MultiLabel] = {}
+    
+    def get_label(self, name: str) -> Optional[MultiLabel]:
+        """
+        Get the multilabel assigned to a name.
+        
+        Args:
+            name: Variable name to look up
+        Returns:
+            MultiLabel if name is mapped, None otherwise
+        """
+        return self.labelling.get(name)
+    
+    def update_label(self, name: str, multi_label: MultiLabel):
+        """
+        Update or set the multilabel for a name.
+        
+        Args:
+            name: Variable name to update
+            multi_label: New MultiLabel to assign
+        """
+        self.labelling[name] = multi_label
+    
+    def create_copy(self) -> 'MultiLabelling':
+        """
+        Create and return a deep copy of the current multilabelling.
+
+        Returns:
+            A new instance of MultiLabelling with all data deeply copied.
+        """
+        new_labelling = MultiLabelling(self.patterns)
+        new_labelling.labelling = {
+            name: copy.deepcopy(label) for name, label in self.labelling.items()
+        }
+        return new_labelling
+
+    def combine(self, other: 'MultiLabelling') -> 'MultiLabelling':
+        """
+        Combine two multilabellings into a new one where labels reflect
+        the possible outcomes of either multilabelling.
+
+        Args:
+            other: Another MultiLabelling instance to combine with.
+
+        Returns:
+            A new MultiLabelling instance representing the combination.
+        """
+        combined_labelling = MultiLabelling(self.patterns)
+
+        # Combine labels for all variable names present in either of the labellings
+        all_names = set(self.labelling.keys()) | set(other.labelling.keys())
+        for name in all_names:
+            label_self = self.get_label(name)
+            label_other = other.get_label(name)
+
+            if label_self and label_other:
+                # If both exist, combine their MultiLabels
+                combined_labelling.update_label(name, label_self.combine(label_other))
+            elif label_self:
+                # If only in self, copy it
+                combined_labelling.update_label(name, copy.deepcopy(label_self))
+            elif label_other:
+                # If only in other, copy it
+                combined_labelling.update_label(name, copy.deepcopy(label_other))
+
+        return combined_labelling
+
+class Vulnerabilities: #TODO: guardar os unsanitized como os sanitized
+    """
+    Collects and organizes discovered illegal flows during program analysis.
+    """
     def __init__(self):
+        """Initialize an empty Vulnerabilities collector."""
+        # Dictionary mapping vulnerability names to lists of illegal flow info
+        self.illegal_flows: Dict[str, List[Dict]] = {}
+    
+    def add_illegal_flows(self, name: str, multi_label: MultiLabel):
         """
-        Constructor: Initializes the mapping from variable names to MultiLabels.
+        Record illegal flows detected for a name.
+        
+        Args:
+            name: Name that is the sink of the illegal flows
+            multi_label: MultiLabel containing only the illegal flows to this sink
         """
-        self.mapping = {}
-
-    def get_multilabel(self, var_name):
-        """
-        Retrieves the MultiLabel assigned to a variable.
-        :param var_name: Variable name.
-        :return: MultiLabel object or None if not assigned.
-        """
-        return self.mapping.get(var_name)
-
-    def update_multilabel(self, var_name, multilabel):
-        """
-        Updates the MultiLabel assigned to a variable.
-        :param var_name: Variable name.
-        :param multilabel: MultiLabel object.
-        """
-        self.mapping[var_name] = multilabel
-
-    def __repr__(self):
-        return f"MultiLabelling(mapping={self.mapping})"
-
-
-class Vulnerabilities:
-    def __init__(self):
-        """
-        Constructor: Initializes the vulnerabilities collection.
-        """
-        self.data = {}
-
-    def add_illegal_flow(self, multilabel, sink_name):
-        """
-        Records illegal flows detected for a sink.
-        :param multilabel: MultiLabel with the sources and sanitizers for illegal flows.
-        :param sink_name: Name of the sink.
-        """
-        for pattern_name, label in multilabel.labels.items():
-            if pattern_name not in self.data:
-                self.data[pattern_name] = []
-            self.data[pattern_name].append(
-                {
-                    "sink": sink_name,
-                    "sources": label.get_sources(),
-                    "sanitizers": {
-                        source: label.get_sanitizers(source)
-                        for source in label.get_sources()
-                    },
+        for pattern_name, label in multi_label.labels.items():
+            if label.get_sources():  # Only process if there are sources
+                if pattern_name not in self.illegal_flows:
+                    self.illegal_flows[pattern_name] = []
+                
+                # Record the flow information
+                applied_sanitizers = {
+                    source: list(label.get_sanitizers_for_source(source))
+                    for source in label.get_sources()
                 }
-            )
-
-    def generate_report(self):
+                flow_info = {
+                    'sink': name,
+                    'sources': list(label.get_sources()),
+                    'sanitized_flows': applied_sanitizers,
+                }
+                self.illegal_flows[pattern_name].append(flow_info)
+    
+    def get_report(self) -> Dict[str, List[Dict]]:
         """
-        Generates a summary report of vulnerabilities.
-        :return: Dictionary of vulnerabilities grouped by pattern.
+        Get a report of all recorded illegal flows.
+        
+        Returns:
+            Dictionary mapping vulnerability names to lists of flow information
         """
-        return self.data
+        return copy.deepcopy(self.illegal_flows)
 
-    def __repr__(self):
-        return f"Vulnerabilities(data={self.data})"
-
-
-class Node:
-    def __init__(self, identifier, node_type, ast_node, line_num):
-        self.identifier = identifier  # Unique identifier for the node
-        self.node_type = node_type  # Type of node (variable, literal, expression, etc)
-        self.ast_node = ast_node  # Reference to original AST node
-        self.line_num = line_num  # Line number for reporting
-        self.incoming_flows = []  # List of nodes that flow into this node
-        self.outgoing_flows = []  # List of nodes this flows into
-        self.sanitized_by = []  # List of sanitizer functions applied
-
-
-class FlowGraph:
-    def __init__(self):
-        self.nodes = {}  # Dictionary of nodes by identifier
-        self.variables = {}  # Track latest assignment to each variable
-        self.sources = set()  # Track identified source nodes
-        self.sinks = set()  # Track identified sink nodes
-
-    def __str__(self):
-        graph_str = ["FlowGraph:"]
-
-        # Nodes
-        graph_str.append("Nodes:")
-        for node_id, node in self.nodes.items():
-            graph_str.append(
-                f"  {node_id} ({node.node_type}, line {node.line_num}): "
-                f"incoming={len(node.incoming_flows)}, outgoing={len(node.outgoing_flows)}"
-            )
-
-        # Flows
-        graph_str.append("\nFlows:")
-        for node_id, node in self.nodes.items():
-            for out_node in node.outgoing_flows:
-                graph_str.append(f"  {node_id} -> {out_node.identifier}")
-
-        # Sources and Sinks
-        graph_str.append("\nSources:")
-        for source in self.sources:
-            graph_str.append(f"  {source.identifier} (line {source.line_num})")
-
-        graph_str.append("\nSinks:")
-        for sink in self.sinks:
-            graph_str.append(f"  {sink.identifier} (line {sink.line_num})")
-
-        return "\n".join(graph_str)
-
-    def find_paths(self, source, sink, visited=None):
-        """Find all paths between source and sink nodes"""
-        if visited is None:
-            visited = set()
-
-        if source == sink:
-            return [[source]]
-
-        paths = []
-        visited.add(source)
-
-        for next_node in source.outgoing_flows:
-            if next_node not in visited:
-                for path in self.find_paths(next_node, sink, visited):
-                    paths.append([source] + path)
-
-        visited.remove(source)
-        return paths
-
-    def check_sanitization(self, path, sanitizers):
-        """Check if path contains any sanitizers"""
-        sanitized_flows = []
-        for node in path:
-            if node.node_type == "call":
-                callee_str = self.get_callee_string(node.ast_node["callee"])
-                if callee_str in sanitizers:
-                    sanitized_flows.append([callee_str, node.line_num])
-        return sanitized_flows
-
-
-class FlowGraphBuilder:
-    def __init__(self, sources, sinks, patterns):
-        self.sinks: set = sinks
-        self.sources: set = sources
-        self.graph = FlowGraph()
-        self.current_scope = []  # Track variables in scope for implicit flows
-
-    def build(self, ast):
-        self.visit_node(ast)
-        return self.graph
-
-    def visit_node(self, ast_node):
-        # Handle different node types
-        if ast_node["type"] == "Program":
-            self.handle_program(ast_node)
-        if ast_node["type"] == "Identifier":
-            self.handle_identifier(ast_node)
-        if ast_node["type"] == "Literal":
-            self.handle_literal(ast_node)
-        if ast_node["type"] == "ExpressionStatement":
-            self.handle_expression_statement(ast_node)
-        elif ast_node["type"] == "AssignmentExpression":
-            self.handle_assignment(ast_node)
-        elif ast_node["type"] == "CallExpression":
-            self.handle_call_expression(ast_node)
-        # ... handle other node types
-
-        # Recursively visit child nodes
-        for key, dictionary in ast_node.items():
-            if isinstance(dictionary, dict):
-                if key != "loc":
-                    self.visit_node(dictionary)
-            elif isinstance(dictionary, list):
-                for item in dictionary:
-                    if isinstance(item, dict):
-                        self.visit_node(item)
-
-    def handle_literal(self, node):
-        print("Handle literal")
-        # Create node for literal
-        literal_node = Node(
-            identifier=f"lit_{len(self.graph.nodes)}",
-            node_type="literal",
-            ast_node=node,
-            line_num=node["loc"]["start"]["line"],
-        )
-        self.graph.nodes[literal_node.identifier] = literal_node
-        return literal_node
-
-    def handle_expression_statement(self, node):
-        print("Handle expression statement")
-        return self.visit_node(node["expression"])
-
-    def handle_identifier(self, node):
-        print("Handle identifier")
-        # Check if identifier is a variable
-        var_name = node["name"]
-        for var in self.graph.variables:
-            if var[""] == var_name:
-                return self.graph.variables[var]
-        var_node = Node(
-            identifier=make_identifier("var", var_name),
-            node_type="variable",
-            ast_node=node,
-            line_num=node["loc"]["start"]["line"],
-        )
-        self.graph.nodes[var_node.identifier] = var_node
-        return var_node
-
-    def handle_program(self, node):
-        print("Handle program")
-        for statement in node["body"]:
-            self.visit_node(statement)
-
-    def handle_variable_declaration(self, node):
-        print("handle_variable_declaration")
-        for declarator in node["declarations"]:
-            var_name = declarator["id"]["name"]
-
-            # Create node for variable
-            var_node = Node(
-                identifier=f"var_{var_name}",
-                node_type="variable",
-                ast_node=declarator["id"],
-                line_num=declarator["id"]["loc"]["start"]["line"],
-            )
-            self.graph.nodes[var_node.identifier] = var_node
-
-            # Handle initialization if present
-            if declarator.get("init"):
-                init_node = self.visit_node(declarator["init"])
-                if init_node:
-                    self.add_flow(init_node, var_node)
-
-            # Update variable tracking
-            self.graph.variables[var_name] = var_node
-
-    def handle_assignment(self, node):
-        print("handle_assignment")
-        # Handle right side of assignment
-        right_node = self.visit_node(node["right"])
-
-        # Handle left side of assignment
-        left_node = self.visit_node(node["left"])
-        if left_node:
-            self.add_flow(right_node, left_node)
-
-    def handle_call_expression(self, node):
-        print("handle_call_expression")
-        # Create node for the call
-        call_node = Node(
-            identifier=f"call_{len(self.graph.nodes)}",
-            node_type="call",
-            ast_node=node,
-            line_num=node["loc"]["start"]["line"],
-        )
-        self.graph.nodes[call_node.identifier] = call_node
-
-        # Handle callee (could be member expression or identifier)
-        callee = self.visit_node(node["callee"])
-        if callee:
-            self.add_flow(callee, call_node)
-
-        # Check if this is a source or sink
-        # callee_str = self.get_callee_string(node["callee"])
-        n = node["callee"]["name"]
-        if self.is_source(n):
-            self.graph.sources.add(call_node)
-        elif self.is_sink(n):
-            self.graph.sinks.add(call_node)
-
-        # Handle arguments
-        for arg in node["arguments"]:
-            arg_node = self.visit_node(arg)
-            if arg_node:
-                self.add_flow(arg_node, call_node)
-
-        return call_node
-
-    def add_flow(self, from_node, to_node):
-        print("add_flow")
-        """Add a flow edge between nodes"""
-        if from_node not in to_node.incoming_flows:
-            to_node.incoming_flows.append(from_node)
-        if to_node not in from_node.outgoing_flows:
-            from_node.outgoing_flows.append(to_node)
-
-    def is_sink(self, node):
-        return node in self.sinks
-
-    def is_source(self, node):
-        return node in self.sources
-
-
-def analyze_vulnerabilities(ast, patterns):
-    # Build flow graph
-    builder = FlowGraphBuilder()
-    graph = builder.build(ast)
-
-    vulnerabilities = []
-
-    # Check each pattern
-    for pattern in patterns:
-        # Find flows between sources and sinks
-        for source_node in graph.sources:
-            for sink_node in graph.sinks:
-                # Get source and sink strings
-                source_str = graph.get_callee_string(source_node.ast_node["callee"])
-                sink_str = graph.get_callee_string(sink_node.ast_node["callee"])
-
-                # Check if they match pattern
-                if source_str in pattern["sources"] and sink_str in pattern["sinks"]:
-
-                    # Find all paths
-                    paths = graph.find_paths(source_node, sink_node)
-                    if paths:
-                        # Check sanitization
-                        sanitized_paths = []
-                        has_unsanitized = False
-
-                        for path in paths:
-                            sanitizers = graph.check_sanitization(
-                                path, pattern["sanitizers"]
-                            )
-                            if sanitizers:
-                                sanitized_paths.append(sanitizers)
-                            else:
-                                has_unsanitized = True
-
-                        # Add vulnerability
-                        vulnerabilities.append(
-                            {
-                                "vulnerability": pattern["vulnerability"],
-                                "source": [source_str, source_node.line_num],
-                                "sink": [sink_str, sink_node.line_num],
-                                "implicit_flows": (
-                                    "yes" if graph.has_implicit_flow(path) else "no"
-                                ),
-                                "unsanitized_flows": "yes" if has_unsanitized else "no",
-                                "sanitized_flows": sanitized_paths,
-                            }
-                        )
-
-    return vulnerabilities
-
-
-def make_identifier(node_type, name):
-    opts = {
-        "var": "var_" + name,
-        # etc
-    }
-
-    if node_type not in opts:
-        return f"NOT_A_VALID_TYPE_({name})"
-
-    return opts[node_type]

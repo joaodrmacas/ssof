@@ -5,5 +5,3 @@ while (e == "") {
     a = e;
 }
 g = h(a);
-
-// tip: sources, sanitizers and sinks can appear inside loops

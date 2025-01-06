@@ -2,8 +2,8 @@ from typing import List, Dict, Set, Optional
 from dataclasses import dataclass
 from typing import List, Dict, Set, Optional
 import copy
-import json
-import esprima
+
+
 
 class Pattern:
     """
@@ -281,6 +281,50 @@ class MultiLabelling:
             multi_label: New MultiLabel to assign
         """
         self.labelling[name] = multi_label
+    
+    def create_copy(self) -> 'MultiLabelling':
+        """
+        Create and return a deep copy of the current multilabelling.
+
+        Returns:
+            A new instance of MultiLabelling with all data deeply copied.
+        """
+        new_labelling = MultiLabelling(self.patterns)
+        new_labelling.labelling = {
+            name: copy.deepcopy(label) for name, label in self.labelling.items()
+        }
+        return new_labelling
+
+    def combine(self, other: 'MultiLabelling') -> 'MultiLabelling':
+        """
+        Combine two multilabellings into a new one where labels reflect
+        the possible outcomes of either multilabelling.
+
+        Args:
+            other: Another MultiLabelling instance to combine with.
+
+        Returns:
+            A new MultiLabelling instance representing the combination.
+        """
+        combined_labelling = MultiLabelling(self.patterns)
+
+        # Combine labels for all variable names present in either of the labellings
+        all_names = set(self.labelling.keys()) | set(other.labelling.keys())
+        for name in all_names:
+            label_self = self.get_label(name)
+            label_other = other.get_label(name)
+
+            if label_self and label_other:
+                # If both exist, combine their MultiLabels
+                combined_labelling.update_label(name, label_self.combine(label_other))
+            elif label_self:
+                # If only in self, copy it
+                combined_labelling.update_label(name, copy.deepcopy(label_self))
+            elif label_other:
+                # If only in other, copy it
+                combined_labelling.update_label(name, copy.deepcopy(label_other))
+
+        return combined_labelling
 
 class Vulnerabilities: #TODO: guardar os unsanitized como os sanitized
     """
@@ -312,8 +356,7 @@ class Vulnerabilities: #TODO: guardar os unsanitized como os sanitized
                 flow_info = {
                     'sink': name,
                     'sources': list(label.get_sources()),
-                    'sanitized_flows': [],
-
+                    'sanitized_flows': applied_sanitizers,
                 }
                 self.illegal_flows[pattern_name].append(flow_info)
     
@@ -334,98 +377,4 @@ class Trace:
     def __str__(self) -> str:
         return " -> ".join(self.steps)
 
-class MultiLabellingWithPaths(MultiLabelling):
-    """
-    Extended MultiLabelling class that handles multiple execution paths.
-    """
-    def create_copy(self) -> 'MultiLabellingWithPaths':
-        """
-        Create a deep copy of the current multilabelling.
-        
-        Returns:
-            New MultiLabellingWithPaths instance with copied data
-        """
-        new_labelling = MultiLabellingWithPaths(self.patterns)
-        for name, multi_label in self.labelling.items():
-            new_labelling.labelling[name] = copy.deepcopy(multi_label)
-        return new_labelling
-    
-    def combine_paths(self, other: 'MultiLabellingWithPaths') -> 'MultiLabellingWithPaths':
-        """
-        Combine two multilabellings to represent possible outcomes from different paths.
-        
-        Args:
-            other: Another MultiLabellingWithPaths instance
-        Returns:
-            New MultiLabellingWithPaths combining both inputs
-        """
-        combined = MultiLabellingWithPaths(self.patterns)
-        
-        # Get all variable names from both labellings
-        all_names = set(self.labelling.keys()) | set(other.labelling.keys())
-        
-        # For each variable, combine its labels from both paths
-        for name in all_names:
-            self_label = self.get_label(name)
-            other_label = other.get_label(name)
-            
-            if self_label and other_label:
-                # If variable exists in both paths, combine labels
-                combined.update_label(name, self_label.combine(other_label))
-            elif self_label:
-                # If variable only exists in this path
-                combined.update_label(name, copy.deepcopy(self_label))
-            elif other_label:
-                # If variable only exists in other path
-                combined.update_label(name, copy.deepcopy(other_label))
-        
-        return combined
 
-
-def extract_ast(file_path, output_path):
-    """
-    Extracts the AST of a JavaScript file and outputs it as JSON.
-    :param file_path: Path to the JavaScript file.
-    :param output_path: Path to save the JSON representation of the AST.
-    """
-    with open(file_path, 'r') as js_file:
-        code = js_file.read()
-
-    # Parse the JavaScript code into an AST
-    ast = esprima.parseScript(code, loc=True).toDict()
-
-    # Save the AST as JSON
-    with open(output_path, 'w') as json_file:
-        json.dump(ast, json_file, indent=4)
-    print(f"AST saved to {output_path}")
-
-
-def traverse_ast(ast, depth=0):
-    """
-    Recursively traverses an AST and prints the node type and starting line number.
-    :param ast: AST node (dictionary).
-    :param depth: Current depth in the tree (used for indentation).
-    """
-    if isinstance(ast, dict):
-        # Print node type and line number
-        node_type = ast.get('type')
-        if not node_type:
-            return
-        loc = ast.get('loc', {}).get('start', {}).get('line', 'N/A')
-        print(f"{' ' * depth}- {node_type} (Line: {loc})")
-
-        # Recursively traverse children
-        for key, value in ast.items():
-            traverse_ast(value, depth + 2)
-
-    elif isinstance(ast, list):
-        # Traverse each element in the list
-        for item in ast:
-            traverse_ast(item, depth)
-
-    # Base case: primitive value (ignore)
-
-extract_ast("../slices/1-basic-flow/1a-basic-flow.js", "../slices/1-basic-flow/1a-basic-flow.ast.js")
-with open("../slices/1-basic-flow/1a-basic-flow.ast.js", "r") as file:
-    ast = json.load(file)
-    traverse_ast(ast)
