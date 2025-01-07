@@ -1,4 +1,4 @@
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Any
 import copy
 
 
@@ -6,7 +6,7 @@ class Pattern:
     """
     Represents a security vulnerability pattern with its sources, sanitizers, and sinks.
     """
-    def __init__(self, name: str, sources: List[str], sanitizers: List[str], sinks: List[str]):
+    def __init__(self, name: str, source_names: List[str], sanitizer_names: List[str], sink_names: List[str], implicit: bool):
         """
         Initialize a Pattern object.
         
@@ -17,37 +17,38 @@ class Pattern:
             sinks: List of sink function/variable names
         """
         self.name = name
-        self.sources = set(sources)
-        self.sanitizers = set(sanitizers)
-        self.sinks = set(sinks)
+        self.source_names = set(source_names)
+        self.sanitizer_names = set(sanitizer_names)
+        self.sink_names = set(sink_names)
+        self.implicit = implicit
     
     def get_name(self) -> str:
         """Return the vulnerability pattern name."""
         return self.name
     
-    def get_sources(self) -> Set[str]:
+    def get_source_names(self) -> Set[str]:
         """Return the set of sources."""
-        return self.sources
+        return self.source_names
     
     def get_sanitizers(self) -> Set[str]:
         """Return the set of sanitizers."""
-        return self.sanitizers
+        return self.sanitizer_names
     
     def get_sinks(self) -> Set[str]:
         """Return the set of sinks."""
-        return self.sinks
+        return self.sink_names
     
     def is_source(self, name: str) -> bool:
         """Check if a name is a source in this pattern."""
-        return name in self.sources
+        return name in self.source_names
     
     def is_sanitizer(self, name: str) -> bool:
         """Check if a name is a sanitizer in this pattern."""
-        return name in self.sanitizers
+        return name in self.sanitizer_names
     
     def is_sink(self, name: str) -> bool:
         """Check if a name is a sink in this pattern."""
-        return name in self.sinks
+        return name in self.sink_names
 
 class Label:
     """
@@ -56,37 +57,34 @@ class Label:
     def __init__(self):
         """Initialize an empty Label."""
         # Dictionary mapping source names to sets of sanitizers applied to that source
-        self.source_sanitizers: Dict[str, Set[str]] = {}
+        self.source_sanitizers: Dict[str, List[List[List[Any]]]] = {}
+
+    def is_tainted(self):
+        return not self.source_sanitizers
     
     def add_source(self, source: str):
         """Add a new source to the label if not already present."""
         if source not in self.source_sanitizers:
-            self.source_sanitizers[source] = set()
+            self.source_sanitizers[source] = [[]]
     
-    def add_sanitizer(self, source, sanitizer):
+    def add_sanitizer(self, source, sanitizer, line=-1):
         """
         Add a sanitizer that intercepts the flow from a specific source.
 
         :param source: The source to which the sanitizer applies.
         :param sanitizer: The sanitizer to be added.
         """
-        if source in self.source_sanitizers.keys():
-            self.source_sanitizers[source].update([sanitizer])
+        
+        for flow in self.source_sanitizers[source]:
+            flow.append([sanitizer, line])
     
     def get_sources(self) -> Set[str]:
         """Return all sources in the label."""
         return set(self.source_sanitizers.keys())
     
-    def get_sanitizers_for_source(self, source: str) -> Set[str]:
+    def get_sanitizers_for_source(self, source: str) -> List[List[List[Any]]]:
         """Return sanitizers applied to a specific source."""
-        return self.source_sanitizers.get(source, set())
-    
-    def get_all_sanitizers(self) -> Set[str]:
-        """Return all sanitizers used in this label."""
-        all_sanitizers = set()
-        for sanitizers in self.source_sanitizers.values():
-            all_sanitizers.update(sanitizers)
-        return all_sanitizers
+        return copy.deepcopy(self.source_sanitizers.get(source, list(list()) ))
     
     def combine(self, other: 'Label') -> 'Label':
         """
@@ -102,8 +100,7 @@ class Label:
             if source not in new_label.source_sanitizers:
                 new_label.source_sanitizers[source] = sanitizers.copy()
             else:
-                # For shared sources, take the intersection of sanitizers
-                new_label.source_sanitizers[source] &= sanitizers
+                new_label.source_sanitizers[source].append(sanitizers.copy())
         
         return new_label
 
@@ -158,7 +155,6 @@ class MultiLabel:
         
         return new_multilabel
 
-#LAB 2
 
 class Policy:
     """
@@ -248,14 +244,10 @@ class MultiLabelling:
     """
     Represents a mapping from variable names to multilabels.
     """
-    def __init__(self, patterns: List[Pattern] = []):
+    def __init__(self):
         """
-        Initialize a MultiLabelling object.
-        
-        Args:
-            patterns: List of Pattern objects for creating empty multilabels
+        Initialize a MultiLabelling object.        
         """
-        self.patterns = patterns
         self.labelling: Dict[str, MultiLabel] = {}
     
     def get_label(self, name: str) -> Optional[MultiLabel]:
@@ -286,7 +278,7 @@ class MultiLabelling:
         Returns:
             A new instance of MultiLabelling with all data deeply copied.
         """
-        new_labelling = MultiLabelling(self.patterns)
+        new_labelling = MultiLabelling()
         new_labelling.labelling = {
             name: copy.deepcopy(label) for name, label in self.labelling.items()
         }
@@ -303,7 +295,7 @@ class MultiLabelling:
         Returns:
             A new MultiLabelling instance representing the combination.
         """
-        combined_labelling = MultiLabelling(self.patterns)
+        combined_labelling = MultiLabelling()
 
         # Combine labels for all variable names present in either of the labellings
         all_names = set(self.labelling.keys()) | set(other.labelling.keys())
@@ -323,7 +315,7 @@ class MultiLabelling:
 
         return combined_labelling
 
-class Vulnerabilities: #TODO: guardar os unsanitized como os sanitized
+class Vulnerabilities:
     """
     Collects and organizes discovered illegal flows during program analysis.
     """
@@ -364,5 +356,4 @@ class Vulnerabilities: #TODO: guardar os unsanitized como os sanitized
         Returns:
             Dictionary mapping vulnerability names to lists of flow information
         """
-        return copy.deepcopy(self.illegal_flows)
-
+        return self.illegal_flows

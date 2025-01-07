@@ -1,0 +1,105 @@
+//
+[
+    {
+        "vulnerability": "A_1",
+        "source": [
+            "b",
+            1
+        ],
+        "sink": [
+            "f",
+            11
+        ],
+        "unsanitized_flows": "no",
+        "sanitized_flows": [
+            [
+                [
+                    "sanit",
+                    7
+                ],
+                [
+                    "sanit",
+                    2
+                ],
+                [
+                    "sanit",
+                    8
+                ],
+                [
+                    "sanit",
+                    11
+                ],
+                [
+                    "sanit",
+                    1
+                ]
+            ],
+            [
+                [
+                    "sanit",
+                    1
+                ],
+                [
+                    "sanit",
+                    2
+                ],
+                [
+                    "sanit",
+                    5
+                ],
+                [
+                    "sanit",
+                    11
+                ]
+            ]
+        ],
+        "implicit": "no"
+    },
+    {
+        "vulnerability": "A_2",
+        "source": [
+            "z",
+            2
+        ],
+        "sink": [
+            "f",
+            11
+        ],
+        "unsanitized_flows": "no",
+        "sanitized_flows": [
+            [
+                [
+                    "sanit",
+                    7
+                ],
+                [
+                    "sanit",
+                    2
+                ],
+                [
+                    "sanit",
+                    8
+                ],
+                [
+                    "sanit",
+                    11
+                ]
+            ],
+            [
+                [
+                    "sanit",
+                    2
+                ],
+                [
+                    "sanit",
+                    5
+                ],
+                [
+                    "sanit",
+                    11
+                ]
+            ]
+        ],
+        "implicit": "no"
+    }
+]
