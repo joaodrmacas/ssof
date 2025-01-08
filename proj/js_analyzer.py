@@ -37,8 +37,8 @@ def main():
     try:
         # Parse JavaScript file
         ast = parse_javascript(js_file)
-        with open(output_file.replace("output", "ast")) as f:
-            json.dump(ast, f)
+#        with open(output_file.replace("output", "ast")) as f:
+#           json.dump(ast, f)
         
         # Load patterns
         patterns = load_patterns(pattern_file)
@@ -51,12 +51,12 @@ def main():
 
         
         # Create output (placeholder for now)
-        create_output(output_file, "")
+        #create_output(output_file, "")
         
     except Exception as e:
+        raise e
         print(f"Error processing files: {str(e)}")
         exit(1)
-        raise e
 
 if __name__ == "__main__":
     main()
