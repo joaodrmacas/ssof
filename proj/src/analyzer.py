@@ -87,7 +87,7 @@ class ASTAnalyzer:
         path.append(" " * depth + f"LITERAL: {raw}")
         lbl = MultiLabel(list(self.policy.patterns.values()))
         #TODO: aqui é value ou raw?
-        lbl.add_source(value)
+        lbl.add_source(value, get_line(node))
         return lbl
 
     def visit_identifier(self, node: Dict,mlbl_ing: MultiLabelling, path: List[str], depth=0):
@@ -102,7 +102,7 @@ class ASTAnalyzer:
 
         # FIXME TODO: unknown variables should be added as sources ALWAYS.
         lbl = MultiLabel(list(self.policy.patterns.values()))
-        lbl.add_source(name)
+        lbl.add_source(name, get_line(node))
         self.multillabeling.update_label(name, lbl)
         return lbl
         
@@ -181,7 +181,7 @@ class ASTAnalyzer:
                             label = arg_lbl.get_label_for_pattern(pattern_name)
                             if label:
                                 for source in label.get_sources():
-                                    sanitized_lbl.labels[pattern_name].add_source(source)
+                                    sanitized_lbl.labels[pattern_name].add_source(source, get_line(node))
                                     sanitized_lbl.labels[pattern_name].add_sanitizer(
                                         source, 
                                         func_name,
@@ -361,3 +361,7 @@ class ASTAnalyzer:
         print("Execution Trace:")
         for step in execution_path:
             print(step)
+
+    
+def get_line(node):
+    return node.get("loc").get("start").get("line")

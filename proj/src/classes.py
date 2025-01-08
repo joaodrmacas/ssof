@@ -58,16 +58,22 @@ class Label:
         """Initialize an empty Label."""
         # Dictionary mapping source names to sets of sanitizers applied to that source
         self.source_sanitizers: Dict[str, List[List[List[Any]]]] = {}
+        self.source_lines: Dict[str, Set[int]] = {}
 
     def is_tainted(self):
         return not self.source_sanitizers
     
-    def add_source(self, source: str):
+    def add_source(self, source: str, line: int):
         """Add a new source to the label if not already present."""
         if source not in self.source_sanitizers:
             self.source_sanitizers[source] = [[]]
+
+        if source not in self.source_lines.keys():
+            self.source_lines[source] = set([line])
+        else:
+            self.source_lines[source].add(line)
     
-    def add_sanitizer(self, source, sanitizer, line=-1):
+    def add_sanitizer(self, source: str, sanitizer: str, line: int):
         """
         Add a sanitizer that intercepts the flow from a specific source.
 
@@ -78,9 +84,9 @@ class Label:
         for flow in self.source_sanitizers[source]:
             flow.append([sanitizer, line])
     
-    def get_sources(self) -> Set[str]:
+    def get_sources(self) -> Dict[str, Set[int]]:
         """Return all sources in the label."""
-        return set(self.source_sanitizers.keys())
+        return self.source_lines
     
     def get_sanitizers_for_source(self, source: str) -> List[List[List[Any]]]:
         """Return sanitizers applied to a specific source."""
@@ -104,14 +110,17 @@ class Label:
         new_label = Label()
         # Copy all sources and their sanitizers from this label
         for source, sanitizers in self.source_sanitizers.items():
-            new_label.source_sanitizers[source] = sanitizers.copy()
+            new_label.source_sanitizers[source] = copy.deepcopy(sanitizers)
+            new_label.source_lines[source] = self.source_lines[source].copy()
         
         # Add all sources and sanitizers from the other label
         for source, sanitizers in other.source_sanitizers.items():
             if source not in new_label.source_sanitizers:
-                new_label.source_sanitizers[source] = sanitizers.copy()
+                new_label.source_sanitizers[source] = copy.deepcopy(sanitizers)
+                new_label.source_lines[source] = other.source_lines[source].copy()
             else:
-                new_label.source_sanitizers[source].append(sanitizers.copy())
+                new_label.source_sanitizers[source].extend(copy.deepcopy(sanitizers))
+                new_label.source_lines[source].union(other.source_lines)
             merge_empty_flows(new_label.source_sanitizers[source])
 
         return new_label
@@ -130,16 +139,16 @@ class MultiLabel:
         self.patterns = {pattern.get_name(): pattern for pattern in patterns}
         self.labels = {pattern.get_name(): Label() for pattern in patterns}
     
-    def add_source(self, source: str):
+    def add_source(self, source: str, line: int):
         """
         Add a source to relevant pattern labels.
         Only adds to patterns where the source is valid.
         """
         for pattern_name, pattern in self.patterns.items():
             if pattern.is_source(source):
-                self.labels[pattern_name].add_source(source)
+                self.labels[pattern_name].add_source(source, line)
 
-    def add_sanitizer(self, source: str, sanitizer: str, line: int = -1):
+    def add_sanitizer(self, source: str, sanitizer: str, line: int):
         """
         Add a sanitizer to relevant pattern labels.
         Only adds to patterns where the source is valid.
@@ -345,23 +354,24 @@ class Vulnerabilities:
             multi_label: MultiLabel containing only the illegal flows to this sink
         """
         for pattern_name, label in multi_label.labels.items():
-            if label.get_sources():  # Only process if there are sources
+            if label.get_sources().keys():  # Only process if there are sources
                 if pattern_name not in self.illegal_flows:
                     self.illegal_flows[pattern_name] = []
                 
                 unsanitized_flag = False
                 sanitized_flows = []
-                for source in label.get_sources():
+                for source in label.get_sources().keys():
                     unsanitized_flag = False
-                    sanitizers = label.get_sanitizers_for_source(source)
-                    if sanitizers:
-                        sanitized_flows.append(list(sanitizers))
-                    else:
-                        unsanitized_flag = True
+                    sanitized_flows = copy.deepcopy(label.get_sanitizers_for_source(source))
+
+                    for flow in sanitized_flows:
+                        if not flow:
+                            unsanitized_flag = True
+                            sanitized_flows.remove(flow)
                     
                     flow_info = {
-                        'sink': name,
-                        'sources': source,
+                        'sink': [name, -1],
+                        'sources': [source, -1],
                         'unsanitized_flows': unsanitized_flag,
                         'sanitized_flows': sanitized_flows,
                     }
@@ -374,4 +384,5 @@ class Vulnerabilities:
         Returns:
             Dictionary mapping vulnerability names to lists of flow information
         """
-        return self.illegal_flows
+
+        return copy.deepcopy(self.illegal_flows)
