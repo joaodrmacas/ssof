@@ -8,6 +8,7 @@ from src.patterns import load_patterns
 from src.output import json_to_file
 from src.classes import Policy, MultiLabelling, Vulnerabilities
 
+
 def main():
     # Check if correct number of arguments
     if len(sys.argv) != 3:
@@ -33,14 +34,15 @@ def main():
 
     # Generate output filename
     js_filename = os.path.basename(js_file)
-    output_file = os.path.join(output_dir, f"{os.path.splitext(js_filename)[0]}.output.json")
+    output_file = os.path.join(
+        output_dir, f"{os.path.splitext(js_filename)[0]}.actual.json")
 
     try:
         # Parse JavaScript file
         ast = parse_javascript(js_file)
 #        with open(output_file.replace("output", "ast")) as f:
 #           json.dump(ast, f)
-        
+
         # Load patterns
         patterns = load_patterns(pattern_file)
 
@@ -53,13 +55,13 @@ def main():
 
         # Write output to file
         print(f"Writing output to '{output_file}'")
-        json_to_file(output_file,output)
+        json_to_file(output_file, output)
 
-        
     except Exception as e:
         raise e
         # print(f"Error processing files: {str(e)}")
         # exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,7 @@ import subprocess
 import sys
 import json
 
+
 def run_tests(max_slice):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     slices_dir = os.path.join(base_dir, "slices")
@@ -26,16 +27,20 @@ def run_tests(max_slice):
             if filename.endswith(".js"):
                 js_file = os.path.join(slice_path, filename)
                 base_name = os.path.splitext(filename)[0]
-                patterns_file = os.path.join(slice_path, f"{base_name}.patterns.json")
-                expected_output_file = os.path.join(slice_path, f"{base_name}.output.json")
-                actual_output_file = os.path.join(output_dir, f"{base_name}.output.json")
+                patterns_file = os.path.join(
+                    slice_path, f"{base_name}.patterns.json")
+                expected_output_file = os.path.join(
+                    slice_path, f"{base_name}.output.json")
+                actual_output_file = os.path.join(
+                    output_dir, f"{base_name}.actual.json")
 
                 if not os.path.exists(patterns_file):
                     print(f"Skipping {js_file}: Patterns file not found.")
                     continue
 
                 if not os.path.exists(expected_output_file):
-                    print(f"Skipping {js_file}: Expected output file not found.")
+                    print(
+                        f"Skipping {js_file}: Expected output file not found.")
                     continue
 
                 # Run the program
@@ -45,7 +50,8 @@ def run_tests(max_slice):
                 print(f"Running: {' '.join(command)}")
 
                 try:
-                    subprocess.run(command, check=True)
+                    subprocess.run(command, check=True,
+                                   stdout=subprocess.DEVNULL)
                 except subprocess.CalledProcessError as e:
                     print(f"Error running {js_file}: {e}")
                     continue
@@ -57,13 +63,19 @@ def run_tests(max_slice):
                         actual_data = json.load(actual)
 
                         if expected_data == actual_data:
-                            print(f"Test passed for {js_file}")
+                            print(f"Test passed for {js_file}\n")
                         else:
-                            print(f"Test failed for {js_file}: Output mismatch")
+                            print(
+                                f"Test failed for {js_file}: Output mismatch")
+                            print("\nExpected:")
+                            print(json.dumps(expected_data, indent=4))
+                            print("\nActual:")
+                            print(json.dumps(actual_data, indent=4))
                 except FileNotFoundError:
                     print(f"Actual output file not found for {js_file}")
                 except json.JSONDecodeError as e:
                     print(f"Error decoding JSON for {js_file}: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

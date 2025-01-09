@@ -53,7 +53,7 @@ def create_json(vulnerabilities: Vulnerabilities) -> str:
         for idx, event in enumerate(value):
             pre_json = copy.deepcopy(event)
 
-            pre_json["vulnerability"] = f"{key+"_"+str(idx+1)}"
+            pre_json["vulnerability"] = f"{key}_{str(idx+1)}"
             dataArray.append(order_keys(pre_json, key_order))
 
     return json.dumps(dataArray, indent=4)
