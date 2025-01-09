@@ -1,6 +1,9 @@
+import copy
 from dataclasses import dataclass
+import json
 from typing import List, Dict, Optional, Callable
 from src.classes import Policy, MultiLabelling, Vulnerabilities, MultiLabel
+from src.output import *
 
 @dataclass
 class Trace:
@@ -354,10 +357,9 @@ class ASTAnalyzer:
         # Initialize and print paths
         execution_path = []
         self.visit_program(node, execution_path)
-        for key, value in self.vulnerabilites.get_report().items():
-            for idx, event in enumerate(value):
-                print(f"Vulnerability: {key+"_"+str(idx+1)}")
-                print(event)
+
+        print_json(self.vulnerabilites)
+
         print("Execution Trace:")
         for step in execution_path:
             print(step)

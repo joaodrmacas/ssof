@@ -371,9 +371,10 @@ class Vulnerabilities:
                     
                     flow_info = {
                         'sink': [name, -1],
-                        'sources': [source, -1],
-                        'unsanitized_flows': unsanitized_flag,
+                        'source': [source, -1],
+                        'unsanitized_flows': "yes" if unsanitized_flag else "no",
                         'sanitized_flows': sanitized_flows,
+                        'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
                     }
                     self.illegal_flows[pattern_name].append(flow_info)
     

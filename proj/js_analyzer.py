@@ -5,7 +5,7 @@ from pprint import pprint
 from src.analyzer import ASTAnalyzer
 from src.parser import parse_javascript
 from src.patterns import load_patterns
-from src.output import create_output
+from src.output import *
 from src.classes import Policy, MultiLabelling, Vulnerabilities
 
 def main():
@@ -49,7 +49,6 @@ def main():
 
         analyzer = ASTAnalyzer(ast, policy, multilabelling, vulnerabilities).trace_execution_paths()
 
-        
         # Create output (placeholder for now)
         #create_output(output_file, "")
         
