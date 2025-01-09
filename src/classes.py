@@ -50,6 +50,9 @@ class Pattern:
         """Check if a name is a sink in this pattern."""
         return name in self.sink_names
 
+    def __str__(self):
+        return f"Pattern(name={self.name}, sources={self.source_names}, sanitizers={self.sanitizer_names}, sinks={self.sink_names})"
+
 class Label:
     """
     Represents the integrity of information in terms of its sources and applied sanitizers.
@@ -84,9 +87,12 @@ class Label:
         for flow in self.source_sanitizers[source]:
             flow.append([sanitizer, line])
     
-    def get_sources(self) -> Dict[str, Set[int]]:
+    def get_sources(self) -> List[str]:
         """Return all sources in the label."""
-        return self.source_lines
+        return list(self.source_lines.keys())
+
+    def get_source_lines(self, source) -> Set[int]:
+        return self.source_lines[source]
     
     def get_sanitizers_for_source(self, source: str) -> List[List[List[Any]]]:
         """Return sanitizers applied to a specific source."""
@@ -97,12 +103,15 @@ class Label:
         Combine this label with another label, creating a new independent label.
         """
         def merge_empty_flows(flows):
+            before = copy.deepcopy(flows)
             has_empty_flow = False
             i = 0
             while i < len(flows):
-                if not flows[i] :
+                if not flows[i]:
                     if has_empty_flow:
                         flows.pop(i)
+                    else:
+                        i += 1
                     has_empty_flow = True
                 else:
                     i += 1
@@ -145,6 +154,14 @@ class MultiLabel:
         self.patterns = {pattern.get_name(): pattern for pattern in patterns}
         self.labels = {pattern.get_name(): Label() for pattern in patterns}
     
+    def add_global_source(self, source: str, line: int):
+        """
+        Add a source to all pattern labels.
+        """
+        for pattern_name, pattern in self.patterns.items():
+            if not pattern.is_source(source) and not pattern.is_sanitizer(source) and not pattern.is_sink(source):
+                self.labels[pattern_name].add_source(source, line)
+
     def add_source(self, source: str, line: int):
         """
         Add a source to relevant pattern labels.
@@ -244,6 +261,7 @@ class Policy:
         Returns:
             Set of vulnerability pattern names
         """
+
         return {
             pattern_name
             for pattern_name, pattern in self.patterns.items()
@@ -356,7 +374,7 @@ class Vulnerabilities:
         # Dictionary mapping vulnerability names to lists of illegal flow info
         self.illegal_flows: Dict[str, List[Dict]] = {}
     
-    def add_illegal_flows(self, name: str, multi_label: MultiLabel, line: int):
+    def add_illegal_flows(self, name: str, line: int, multi_label: MultiLabel):
         """
         Record illegal flows detected for a name.
         
@@ -365,13 +383,13 @@ class Vulnerabilities:
             multi_label: MultiLabel containing only the illegal flows to this sink
         """
         for pattern_name, label in multi_label.labels.items():
-            if label.get_sources().keys():  # Only process if there are sources
+            if label.get_sources():  # Only process if there are sources
                 if pattern_name not in self.illegal_flows:
                     self.illegal_flows[pattern_name] = []
                 
                 unsanitized_flag = False
                 sanitized_flows = []
-                for source in label.get_sources().keys():
+                for source in label.get_sources():
                     unsanitized_flag = False
                     sanitized_flows = copy.deepcopy(label.get_sanitizers_for_source(source))
 
@@ -380,14 +398,15 @@ class Vulnerabilities:
                             unsanitized_flag = True
                             sanitized_flows.remove(flow)
                     
-                    flow_info = {
-                        'sink': [name, line],
-                        'source': [source, -1],
-                        'unsanitized_flows': "yes" if unsanitized_flag else "no",
-                        'sanitized_flows': sanitized_flows,
-                        'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
-                    }
-                    self.illegal_flows[pattern_name].append(flow_info)
+                    for src_line in label.get_source_lines(source):
+                        flow_info = {
+                            'sink': [name, line],
+                            'source': [source, src_line],
+                            'unsanitized_flows': "yes" if unsanitized_flag else "no",
+                            'sanitized_flows': sanitized_flows,
+                            'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
+                        }
+                        self.illegal_flows[pattern_name].append(flow_info)
     
     def get_report(self) -> Dict[str, List[Dict]]:
         """

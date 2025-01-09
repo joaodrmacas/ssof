@@ -21,6 +21,10 @@ class ASTAnalyzer:
         self.policy = policy
         self.multillabeling = multilabelling
         self.vulnerabilites = vulnerabilities
+        self.initialized_vars = []
+
+    def is_variable_initialized(self, var_name: str) -> bool:
+        return var_name in self.initialized_vars
 
     def traverse_ast(self, node=None, depth=0):
         """
@@ -103,8 +107,10 @@ class ASTAnalyzer:
         if lbl:
             return lbl
 
-        # FIXME TODO: unknown variables should be added as sources ALWAYS.
         lbl = MultiLabel(list(self.policy.patterns.values()))
+        # if not self.is_variable_initialized(name):
+        #     lbl.add_global_source(name, get_line(node))
+        # else:
         lbl.add_source(name, get_line(node))
         self.multillabeling.update_label(name, lbl)
         return lbl
@@ -138,6 +144,7 @@ class ASTAnalyzer:
         callee = node.get('callee', {})
         arguments = node.get('arguments', [])
         
+        #self.initialized_vars.append(callee.get('name'))
         path.append(" " * depth + "CALL")
         
         # First evaluate the callee expression to get its label
@@ -184,7 +191,10 @@ class ASTAnalyzer:
                             label = arg_lbl.get_label_for_pattern(pattern_name)
                             if label:
                                 for source in label.get_sources():
-                                    sanitized_lbl.labels[pattern_name].add_source(source, get_line(node))
+                                    src_lines = label.get_source_lines(source)
+                                    last_src_line = sorted(list(src_lines))[-1]
+
+                                    sanitized_lbl.labels[pattern_name].add_source(source, last_src_line)
                                     sanitized_lbl.labels[pattern_name].add_sanitizer(
                                         source, 
                                         func_name,
@@ -207,8 +217,8 @@ class ASTAnalyzer:
                     # Add this sink usage to the vulnerabilities tracking
                     self.vulnerabilites.add_illegal_flows(
                         func_name,
-                        combined_lbl,
-                        get_line(node)
+                        get_line(node),
+                        combined_lbl
                     )
 
         # For non-sanitizer function calls, combine all labels (callee + args)
@@ -298,6 +308,7 @@ class ASTAnalyzer:
         
         if right_label:
             # Handle assignment to identifiers
+            #self.initialized_vars.append(left.get('name'))
             if isinstance(left, dict) and left.get('type') == 'Identifier':
                 left_name = left.get('name')
                 if left_name:
@@ -307,8 +318,8 @@ class ASTAnalyzer:
                         # Check for illegal flows to this sink
                         self.vulnerabilites.add_illegal_flows(
                             left_name,
-                            right_label,
-                            get_line(node)
+                            get_line(node),
+                            right_label
                         )
                     # Update the variable's label in the multilabelling
                     right_label.add_source(left_name, get_line(node))
@@ -329,8 +340,8 @@ class ASTAnalyzer:
                         if vuln_patterns:
                             self.vulnerabilites.add_illegal_flows(
                                 full_name,
-                                right_label,
-                                get_line(node)
+                                get_line(node),
+                                right_label
                             )
         
         return MultiLabel([]) # FIXME: why return a empty multilabel
