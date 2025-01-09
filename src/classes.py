@@ -68,6 +68,7 @@ class Label:
     
     def add_source(self, source: str, line: int):
         """Add a new source to the label if not already present."""
+
         if source not in self.source_sanitizers:
             self.source_sanitizers[source] = [[]]
 
@@ -159,7 +160,7 @@ class MultiLabel:
         Add a source to all pattern labels.
         """
         for pattern_name, pattern in self.patterns.items():
-            if not pattern.is_source(source) and not pattern.is_sanitizer(source) and not pattern.is_sink(source):
+            if not pattern.is_source(source) and not pattern.is_sanitizer(source):
                 self.labels[pattern_name].add_source(source, line)
 
     def add_source(self, source: str, line: int):
@@ -399,15 +400,16 @@ class Vulnerabilities:
                             sanitized_flows.remove(flow)
                     
                     for src_line in label.get_source_lines(source):
-                        flow_info = {
-                            'sink': [name, line],
-                            'source': [source, src_line],
-                            'unsanitized_flows': "yes" if unsanitized_flag else "no",
-                            'sanitized_flows': sanitized_flows,
-                            'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
-                        }
-                        self.illegal_flows[pattern_name].append(flow_info)
-    
+                        if src_line != -1:
+                            flow_info = {
+                                'sink': [name, line],
+                                'source': [source, src_line],
+                                'unsanitized_flows': "yes" if unsanitized_flag else "no",
+                                'sanitized_flows': sanitized_flows,
+                                'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
+                            }
+                            self.illegal_flows[pattern_name].append(flow_info)
+        
     def get_report(self) -> Dict[str, List[Dict]]:
         """
         Get a report of all recorded illegal flows.
