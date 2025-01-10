@@ -1,4 +1,4 @@
-from typing import List, Dict, Set, Optional, Any
+from typing import List, Tuple, Dict, Set, Optional, Any
 import copy
 
 
@@ -60,44 +60,33 @@ class Label:
     def __init__(self):
         """Initialize an empty Label."""
         # Dictionary mapping source names to sets of sanitizers applied to that source
-        self.source_sanitizers: Dict[str, List[List[List[Any]]]] = {}
-        self.source_lines: Dict[str, Set[int]] = {}
+        self.source_sanitizers: Dict[(str, int), List[List[List[Any]]]] = {}
 
     def is_tainted(self):
         return not self.source_sanitizers
     
     def add_source(self, source: str, line: int):
         """Add a new source to the label if not already present."""
-
-        if source not in self.source_sanitizers:
-            self.source_sanitizers[source] = [[]]
-
-        if source not in self.source_lines.keys():
-            self.source_lines[source] = set([line])
-        else:
-            self.source_lines[source].add(line)
+        if (source, line) not in self.source_sanitizers:
+            self.source_sanitizers[(source, line)] = [[]]
     
-    def add_sanitizer(self, source: str, sanitizer: str, line: int):
+    def add_sanitizer(self, source: str, src_line: int, sanitizer: str, line: int):
         """
         Add a sanitizer that intercepts the flow from a specific source.
 
         :param source: The source to which the sanitizer applies.
         :param sanitizer: The sanitizer to be added.
         """
-        
-        for flow in self.source_sanitizers[source]:
+        for flow in self.source_sanitizers[(source, src_line)]:
             flow.append([sanitizer, line])
     
-    def get_sources(self) -> List[str]:
+    def get_sources(self) -> List[Tuple[str, int]]:
         """Return all sources in the label."""
-        return list(self.source_lines.keys())
+        return list(self.source_sanitizers.keys())
 
-    def get_source_lines(self, source) -> Set[int]:
-        return self.source_lines[source]
-    
-    def get_sanitizers_for_source(self, source: str) -> List[List[List[Any]]]:
+    def get_sanitizers_for_source(self, source: str, line: int) -> List[List[List[Any]]]:
         """Return sanitizers applied to a specific source."""
-        return copy.deepcopy(self.source_sanitizers.get(source, list(list()) ))
+        return copy.deepcopy(self.source_sanitizers[(source, line)])
     
     def combine(self, other: 'Label') -> 'Label':
         """
@@ -119,25 +108,22 @@ class Label:
 
         new_label = Label()
         # Copy all sources and their sanitizers from this label
-        for source, sanitizers in self.source_sanitizers.items():
-            new_label.source_sanitizers[source] = copy.deepcopy(sanitizers)
-            new_label.source_lines[source] = self.source_lines[source].copy()
+        for src_n_line, sanitizers in self.source_sanitizers.items():
+            new_label.source_sanitizers[src_n_line] = copy.deepcopy(sanitizers)
         
         # Add all sources and sanitizers from the other label
-        for source, sanitizers in other.source_sanitizers.items():
-            if source not in new_label.source_sanitizers:
-                new_label.source_sanitizers[source] = copy.deepcopy(sanitizers)
-                new_label.source_lines[source] = copy.deepcopy(other.source_lines[source])
+        for src_n_line, sanitizers in other.source_sanitizers.items():
+            if src_n_line not in new_label.source_sanitizers:
+                new_label.source_sanitizers[src_n_line] = copy.deepcopy(sanitizers)
             else:
-                new_label.source_sanitizers[source].extend(copy.deepcopy(sanitizers))
-                new_label.source_lines[source] = new_label.source_lines[source].union(other.source_lines[source])
+                new_label.source_sanitizers[src_n_line].extend(copy.deepcopy(sanitizers))
 
-            merge_empty_flows(new_label.source_sanitizers[source])
+            merge_empty_flows(new_label.source_sanitizers[src_n_line])
 
         return new_label
     
     def __str__(self):
-        return f"Label(sources={self.source_sanitizers}, lines={self.source_lines})"
+        return f"Label(sources={self.source_sanitizers})"
 
 
 class MultiLabel:
@@ -171,14 +157,14 @@ class MultiLabel:
             if pattern.is_source(source):
                 self.labels[pattern_name].add_source(source, line)
 
-    def add_sanitizer(self, source: str, sanitizer: str, line: int):
+    def add_sanitizer(self, source: str, src_line: int, sanitizer: str, line: int):
         """
         Add a sanitizer to relevant pattern labels.
         Only adds to patterns where the source is valid.
         """
         for pattern_name, pattern in self.patterns.items():
             if pattern.is_source(source) and pattern.is_sanitizer(sanitizer):
-                self.labels[pattern_name].add_sanitizer(source, sanitizer, line)
+                self.labels[pattern_name].add_sanitizer(source, src_line, sanitizer, line)
     
     def get_label_for_pattern(self, pattern_name: str):
         """Get the Label object for a specific pattern."""
@@ -332,18 +318,6 @@ class MultiLabelling:
         """
         self.labelling[name] = multi_label
     
-    def create_copy(self) -> 'MultiLabelling':
-        """
-        Create and return a deep copy of the current multilabelling.
-
-        Returns:
-            A new instance of MultiLabelling with all data deeply copied.
-        """
-        new_labelling = MultiLabelling()
-        new_labelling.labelling = {
-            name: copy.deepcopy(label) for name, label in self.labelling.items()
-        }
-        return new_labelling
 
     def combine(self, other: 'MultiLabelling') -> 'MultiLabelling':
         """
@@ -373,11 +347,18 @@ class MultiLabelling:
             elif label_other:
                 # If only in other, copy it
                 combined_labelling.update_label(name, copy.deepcopy(label_other))
+        
+        combined_labelling.initialized_vars = self.initialized_vars.intersection(other.initialized_vars)
 
         return combined_labelling
     
     def __str__(self):
-        return f"MultiLabelling(labelling={self.labelling})"
+        s = "Multilabeling:\n"
+        for name, label in self.labelling.items():
+            s += f"  {name}: {label}\n"
+        s += f"iv = {self.initialized_vars}"
+
+        return s
 
 class Vulnerabilities:
     """
@@ -407,27 +388,27 @@ class Vulnerabilities:
                 if pattern_name not in self.illegal_flows:
                     self.illegal_flows[pattern_name] = []
                 
-                unsanitized_flag = False
-                sanitized_flows = []
-                for source in label.get_sources():
-                    unsanitized_flag = False
-                    sanitized_flows = copy.deepcopy(label.get_sanitizers_for_source(source))
+                for source, src_line in label.get_sources():
+                    sanitized_flows = copy.deepcopy(label.get_sanitizers_for_source(source, src_line))
 
+
+                    unsanitized_flows = False
+                    # remove all unsanitized flows
                     for flow in sanitized_flows:
                         if not flow:
-                            unsanitized_flag = True
                             sanitized_flows.remove(flow)
-                    
-                    for src_line in label.get_source_lines(source):
-                        if src_line != -1:
-                            flow_info = {
-                                'sink': [name, line],
-                                'source': [source, src_line],
-                                'unsanitized_flows': "yes" if unsanitized_flag else "no",
-                                'sanitized_flows': sanitized_flows,
-                                'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
-                            }
-                            self.illegal_flows[pattern_name].append(flow_info)
+                            unsanitized_flows = True
+
+                    # FIXME: why do we even have -1 line?
+                    if src_line != -1:
+                        flow_info = {
+                            'sink': [name, line],
+                            'source': [source, src_line],
+                            'unsanitized_flows': "yes" if unsanitized_flows else "no",
+                            'sanitized_flows': sanitized_flows,
+                            'implicit': "yes" if False else "no" # TODO FIXME: False needs to be the actual logic to have the implicit
+                        }
+                        self.illegal_flows[pattern_name].append(flow_info)
         
     def get_report(self) -> Dict[str, List[Dict]]:
         """

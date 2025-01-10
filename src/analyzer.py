@@ -47,45 +47,6 @@ class ASTAnalyzer:
             for item in node:
                 self.traverse_ast(item, depth)
 
-    def visit_while_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, max_repetitions=2, depth=0):
-        condition = node.get('test', {}).get('raw', 'condition')
-        body = node.get('body', {}).get('body', [])
-
-        final_mlbl_ing = mlbl_ing.create_copy()
-        for i in range(max_repetitions + 1):
-            path.append(" " * depth + f"WHILE ({condition}) iteration {i}")
-            for statement in body:
-                mlbl_ing = self.visit_statement(
-                    statement, mlbl_ing, path, depth + 2)
-
-            final_mlbl_ing = final_mlbl_ing.combine(mlbl_ing)
-        path.append(" " * depth + f"EXIT WHILE ({condition})")
-        return copy.deepcopy(mlbl_ing)
-
-    def visit_if_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0):
-        test = node.get('test', {}).get('raw', 'condition')
-        path.append(" " * depth + f"IF ({test})")
-
-        alt_mlbl_ing = mlbl_ing.create_copy()
-
-        # Traverse the 'consequent' branch
-        consequent = node.get('consequent', {}).get('body', [])
-        for statement in consequent:
-            mlbl_ing = self.visit_statement(
-                statement, mlbl_ing, path, depth + 2)
-
-        # Traverse the 'alternate' branch, if present
-        alternate = node.get('alternate', {}).get('body', [])
-        if alternate:
-            path.append(" " * depth + "ELSE")
-            for statement in alternate:
-                alt_mlbl_ing = self.visit_statement(
-                    statement, alt_mlbl_ing, path, depth + 2)
-
-        path.append(" " * depth + "END IF")
-
-        return copy.deepcopy(mlbl_ing.combine(alt_mlbl_ing))
-
     def visit_literal(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
         """Visit a literal node (numbers, strings, booleans, etc.)"""
         value = node.get('value', 'unknown')
@@ -103,20 +64,14 @@ class ASTAnalyzer:
 
         # Check if this identifier exists in the multilabelling
         mlbl = copy.deepcopy(mlbl_ing.get_label(name))
-        if mlbl:
-            mlbl.add_source(name, get_line(node))
-            mlbl_ing.update_label(name, mlbl)
+        if not mlbl:
+            mlbl = MultiLabel(list(self.policy.patterns.values()))
 
-            return mlbl
-
-        mlbl = MultiLabel(list(self.policy.patterns.values()))
-        
         if not mlbl_ing.is_initialized_vars(name):
             mlbl.add_global_source(name, get_line(node))
         else:
             mlbl.add_source(name, get_line(node))
         mlbl_ing.update_label(name, mlbl)
-
         return mlbl
 
     def visit_unary_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
@@ -191,34 +146,28 @@ class ASTAnalyzer:
 
                 # print("\nINI args_mlbls:")
                 # for arg_mlbl in args_mlbls:
-                    # print(arg_mlbl)
+                #     print(arg_mlbl)
                 # print("END args_mlbls\n")
 
-                # print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
+                print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
                 # For each argument that was passed to the sanitizer
-                already_sanitized = []
-                for arg_mlbl in args_mlbls:
-                    # Transfer sources and add sanitizer to each source's flow
-                    for pattern_name, pattern in self.policy.patterns.items():
-                        if pattern_name not in vuln_patterns:
-                            continue
-                        label = copy.deepcopy(
-                            arg_mlbl.get_label_for_pattern(pattern_name))
-                        if not label:
-                            continue
-                        for source in label.get_sources():
-                            for src_line in label.get_source_lines(source):
-                                sanitized_mlbl.labels[pattern_name].add_source(
-                                    source, src_line)
-                            if source not in already_sanitized:
-                                sanitized_mlbl.labels[pattern_name].add_sanitizer(
-                                    source,
-                                    func_name,
-                                    get_line(node)
-                                )
-                                already_sanitized.append(source)
+                for pattern_name in vuln_patterns:
+                    label = copy.deepcopy(
+                        arg_mlbl.get_label_for_pattern(pattern_name))
+                    if not label:
+                        continue
 
-                # print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
+                    # FIXME: what if there's two sources in the same line
+                    for source, src_line in label.get_sources():
+                        sanitized_mlbl.labels[pattern_name].add_source(source, src_line)
+                        sanitized_mlbl.labels[pattern_name].add_sanitizer(
+                            source,
+                            src_line,
+                            func_name,
+                            get_line(node)
+                        )
+
+                print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
             # Check if this is a sink call
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
@@ -375,8 +324,8 @@ class ASTAnalyzer:
 
         # Handle assignment to identifiers
         if isinstance(left, dict) and left.get('type') == 'Identifier':
-            mlbl_ing.add_initialized_vars(left.get('name'))
             left_name = left.get('name')
+            mlbl_ing.add_initialized_vars(left_name)
             if left_name:
                 # Check if the left-hand variable is a sink
                 vuln_patterns = self.policy.get_vulnerabilities_for_sink(
@@ -442,34 +391,66 @@ class ASTAnalyzer:
         # FIXME: why return a empty multilabel
         return copy.deepcopy(MultiLabel([]))
 
+    def visit_while_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, max_repetitions=2, depth=0):
+        condition = node.get('test', {}).get('raw', 'condition')
+        body = node.get('body', {}).get('body', [])
+
+        final_mlbl_ing = mlbl_ing.create_copy()
+        for i in range(max_repetitions + 1):
+            path.append(" " * depth + f"WHILE ({condition}) iteration {i}")
+            for statement in body:
+                mlbl_ing = self.visit_statement(
+                    statement, mlbl_ing, path, depth + 2)
+
+            final_mlbl_ing = final_mlbl_ing.combine(mlbl_ing)
+        path.append(" " * depth + f"EXIT WHILE ({condition})")
+        return copy.deepcopy(mlbl_ing)
+
+    def visit_if_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0):
+        test = node.get('test', {}).get('raw', 'condition')
+        path.append(" " * depth + f"IF ({test})")
+
+        if_ing = copy.deepcopy(mlbl_ing)
+        else_ing = copy.deepcopy(mlbl_ing)
+
+        # Traverse the 'consequent' branch
+        consequent = node.get('consequent', {}).get('body', [])
+        for statement in consequent:
+            if_ing = self.visit_statement(
+                statement, if_ing, path, depth + 2)
+
+        # Traverse the 'alternate' branch, if present
+        alternate = node.get('alternate', {}).get('body', [])
+        if alternate:
+            path.append(" " * depth + "ELSE")
+            for statement in alternate:
+                else_ing = self.visit_statement(
+                    statement, else_ing, path, depth + 2)
+        
+        path.append(" " * depth + "END IF")
+
+        print("#####################")
+        print("VISIT IF:", get_line(node))
+        print("BEFORE ING: ", mlbl_ing)
+        print("IF ING: ", if_ing)
+        print("ELSE ING: ", else_ing, get_line(node))
+        print("IF ING COMBINE ELSE ING: ", if_ing.combine(else_ing))
+        print("#####################")
+
+        return copy.deepcopy(if_ing.combine(else_ing))
+
     def visit_program(self, node: Dict, path: List[str], depth=0):
         path.append(" " * depth + "PROGRAM")
 
-        mlbl_arr = [MultiLabelling()]
+        mlbl_ing = MultiLabelling()
         for n in node["body"]:
             if "statement" in n.get('type').lower():
-                curr_idx = 0
-                while curr_idx < len(mlbl_arr):
-                    if n.get('type') == 'IfStatement':
-                        new_mlbl = mlbl_arr[curr_idx].create_copy()
-                        mlbl_arr.append(new_mlbl)
-                        curr_idx+=1
-                    mlbl_arr[curr_idx] = self.visit_statement(n, mlbl_arr[curr_idx], path, depth + 2)
-                    curr_idx+=1
+                mlbl_ing = self.visit_statement(n, mlbl_ing, path, depth + 2)
+
             else:
                 print("NOT A STATEMENT ABORTING")
                 print("NOT A STATEMENT ABORTING")
                 print("NOT A STATEMENT ABORTING")
- 
-        mltlbl = MultiLabelling()
-        print('*************')
-        for mlbling in mlbl_arr:
-            print("MLBLING: ")
-            for key, value in mlbling.labelling.items():
-                print(f"{key} : {value}")
-            mltlbl.combine(mlbling)
-            print()
-        print('*************')
 
     def visit_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
         if not isinstance(node, dict):
