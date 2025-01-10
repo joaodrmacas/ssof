@@ -107,13 +107,10 @@ class ASTAnalyzer:
         path.append(" " * depth + f"IDENTIFIER: {name}")
 
         # Check if this identifier exists in the multilabelling
-        mlbl = copy.deepcopy(self.multillabeling.get_label(name))
+        mlbl = copy.deepcopy(mlbl_ing.get_label(name))
         if mlbl:
-            for pattern in self.policy.patterns.values():
-                if name in pattern.get_source_names():
-                    mlbl.labels[pattern.get_name()].source_lines[name].add(
-                        get_line(node))
-            self.multillabeling.update_label(name, mlbl)
+            mlbl.add_source(name, get_line(node))
+            mlbl_ing.update_label(name, mlbl)
 
             return mlbl
 
@@ -122,7 +119,8 @@ class ASTAnalyzer:
             mlbl.add_global_source(name, get_line(node))
         else:
             mlbl.add_source(name, get_line(node))
-        self.multillabeling.update_label(name, mlbl)
+        mlbl_ing.update_label(name, mlbl)
+
         return mlbl
 
     def visit_unary_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
@@ -147,7 +145,7 @@ class ASTAnalyzer:
             return copy.deepcopy(left_lbl.combine(right_lbl))
         elif right_lbl:
             return copy.deepcopy(right_lbl)
-        return left_lbl
+        return copy.deepcopy(left_lbl)
 
     def visit_call_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
         """Visit a function call expression"""
@@ -164,8 +162,7 @@ class ASTAnalyzer:
         args_mlbls: List[MultiLabel] = []
         for arg in arguments:
             arg_lbl = self.visit_expression(arg, mlbl_ing, path, depth + 2)
-            if arg_lbl:
-                args_mlbls.append(arg_lbl)
+            args_mlbls.append(arg_lbl)
 
         # Get the function name - handle both direct calls and member expressions
         func_name = None
@@ -186,44 +183,67 @@ class ASTAnalyzer:
                             self.policy.get_vulnerabilities_for_sanitizer(full_name)):
                         func_name = full_name
 
+        sanitized_mlbl = None
         if func_name:
             # Check if this is a sanitizer call
-            vuln_patterns = self.policy.get_vulnerabilities_for_sanitizer(
-                func_name)
+            vuln_patterns = self.policy.get_vulnerabilities_for_sanitizer(func_name)
             if vuln_patterns and args_mlbls:
-                # Create a new label to represent sanitized output
-                sanitized_lbl = MultiLabel(list(self.policy.patterns.values()))
 
+                sanitized_mlbl = MultiLabel(self.policy.patterns.values())
+
+                # Create a new label to represent sanitized output
+                for arg_mlbl in args_mlbls:
+                    sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
+
+                
+
+                #print("\nINI args_mlbls:")
+                # for arg_mlbl in args_mlbls:
+                    #print(arg_mlbl)
+                #print("END args_mlbls\n")
+
+                print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
                 # For each argument that was passed to the sanitizer
-                for arg_lbl in args_mlbls:
+                already_sanitized = []
+                for arg_mlbl in args_mlbls:
                     # Transfer sources and add sanitizer to each source's flow
                     for pattern_name, pattern in self.policy.patterns.items():
-                        if pattern_name in vuln_patterns:
-                            label = arg_lbl.get_label_for_pattern(pattern_name)
-                            if label:
-                                for source in label.get_sources():
-                                    for src_line in label.get_source_lines(source):
-                                        sanitized_lbl.labels[pattern_name].add_source(
+                        if pattern_name not in vuln_patterns:
+                            continue
+                        label = copy.deepcopy(arg_mlbl.get_label_for_pattern(pattern_name))
+                        if not label:
+                            continue
+                        for source in label.get_sources():
+                            for src_line in label.get_source_lines(source):
+                                sanitized_mlbl.labels[pattern_name].add_source(
                                             source, src_line)
-                                        sanitized_lbl.labels[pattern_name].add_sanitizer(
-                                            source,
-                                            func_name,
-                                            get_line(node)
-                                        )
-
-                # FIXME: if we return here we will never know if the func_name was a sink
-                return copy.deepcopy(sanitized_lbl)
+                            if source not in already_sanitized: 
+                                sanitized_mlbl.labels[pattern_name].add_sanitizer(
+                                    source,
+                                    func_name,
+                                    get_line(node)
+                                )
+                                already_sanitized.append(source)
+                
+                print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
             # Check if this is a sink call
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
             if vuln_patterns:
                 # Combine all argument labels to check what's flowing into the sink
                 combined_lbl = None
+                
+                print(f"CALLEE {callee} LABEL : ", callee_lbl)
+                print(f"\nINI ARGS LABELS : ")
                 for arg_lbl in args_mlbls:
                     if combined_lbl is None:
-                        combined_lbl = arg_lbl
+                        combined_lbl = copy.deepcopy(arg_lbl)
                     else:
                         combined_lbl = combined_lbl.combine(arg_lbl)
+                    print(arg_lbl)
+                print(f"END ARGS LABELS\n")
+
+                print("******** COMBINED : ", combined_lbl)
 
                 if combined_lbl:
                     # Add this sink usage to the vulnerabilities tracking
@@ -233,12 +253,26 @@ class ASTAnalyzer:
                         combined_lbl
                     )
 
-        # For non-sanitizer function calls, combine all labels (callee + args)
+        print(f"######## CALLEE {callee} LABEL : ", callee_lbl)
+        print(f"\nINI ARGS LABELS : ")
+        for arg_mlbl in args_mlbls:
+            print(arg_mlbl)
+        print(f"END ARGS LABELS\n")
+
+        # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
         result_lbl = callee_lbl if callee_lbl else MultiLabel(
             list(self.policy.patterns.values()))
-        for arg_lbl in args_mlbls:
-            result_lbl = result_lbl.combine(arg_lbl)
+        
+        # If we have a sanitized label, use that instead of combining the raw argument labels
+        if sanitized_mlbl:
+            result_lbl = result_lbl.combine(sanitized_mlbl)
+        else:
+            # Otherwise combine with the original argument labels
+            for arg_lbl in args_mlbls:
+                result_lbl = result_lbl.combine(arg_lbl)
+        
 
+        print(f"{callee.get("name")} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
 
     def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
@@ -322,7 +356,7 @@ class ASTAnalyzer:
 
                     # # Update the variable's label in the multilabelling
                     left_label.add_source(left_name, -1)
-                    self.multillabeling.update_label(left_name, left_label)
+                    mlbl_ing.update_label(left_name, left_label)
 
             # Handle assignment to member expressions (e.g., obj.prop = value)
             # TODO:

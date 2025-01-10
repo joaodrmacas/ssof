@@ -127,18 +127,17 @@ class Label:
         for source, sanitizers in other.source_sanitizers.items():
             if source not in new_label.source_sanitizers:
                 new_label.source_sanitizers[source] = copy.deepcopy(sanitizers)
-                new_label.source_lines[source] = other.source_lines[source].copy()
+                new_label.source_lines[source] = copy.deepcopy(other.source_lines[source])
             else:
                 new_label.source_sanitizers[source].extend(copy.deepcopy(sanitizers))
-                new_label.source_lines[source].union(other.source_lines)
+                new_label.source_lines[source] = new_label.source_lines[source].union(other.source_lines[source])
+
             merge_empty_flows(new_label.source_sanitizers[source])
 
         return new_label
     
     def __str__(self):
         return f"Label(sources={self.source_sanitizers}, lines={self.source_lines})"
-
-        
 
 
 class MultiLabel:
@@ -365,6 +364,9 @@ class MultiLabelling:
                 combined_labelling.update_label(name, copy.deepcopy(label_other))
 
         return combined_labelling
+    
+    def __str__(self):
+        return f"MultiLabelling(labelling={self.labelling})"
 
 class Vulnerabilities:
     """
@@ -383,7 +385,13 @@ class Vulnerabilities:
             name: Name that is the sink of the illegal flows
             multi_label: MultiLabel containing only the illegal flows to this sink
         """
+        
         for pattern_name, label in multi_label.labels.items():
+
+            pattern = multi_label.patterns.get(pattern_name)
+            if not pattern or not pattern.is_sink(name):
+                continue
+
             if label.get_sources():  # Only process if there are sources
                 if pattern_name not in self.illegal_flows:
                     self.illegal_flows[pattern_name] = []

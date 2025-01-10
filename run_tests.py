@@ -58,19 +58,8 @@ def run_tests(max_slice):
 
                 # Compare output
                 try:
-                    with open(expected_output_file, "r") as expected, open(actual_output_file, "r") as actual:
-                        expected_data = json.load(expected)
-                        actual_data = json.load(actual)
-
-                        if expected_data == actual_data:
-                            print(f"Test passed for {js_file}\n")
-                        else:
-                            print(
-                                f"Test failed for {js_file}: Output mismatch")
-                            print("\nExpected:")
-                            print(json.dumps(expected_data, indent=4))
-                            print("\nActual:")
-                            print(json.dumps(actual_data, indent=4))
+                    command = ["python3", "validate.py", "-o", actual_output_file, "-t", expected_output_file]
+                    subprocess.run(command, check=True)
                 except FileNotFoundError:
                     print(f"Actual output file not found for {js_file}")
                 except json.JSONDecodeError as e:
