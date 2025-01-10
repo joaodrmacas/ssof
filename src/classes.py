@@ -159,7 +159,7 @@ class MultiLabel:
         Add a source to all pattern labels.
         """
         for pattern_name, pattern in self.patterns.items():
-            if not pattern.is_source(source) and not pattern.is_sanitizer(source):
+            if not pattern.is_sanitizer(source):
                 self.labels[pattern_name].add_source(source, line)
 
     def add_source(self, source: str, line: int):
@@ -299,6 +299,13 @@ class MultiLabelling:
         Initialize a MultiLabelling object.        
         """
         self.labelling: Dict[str, MultiLabel] = {}
+    #     self.initialized_vars = set()
+
+    # def is_initialized_vars(self, name: str) -> bool:
+    #     return name in self.initialized_vars
+    
+    # def add_initialized_vars(self, name: str):
+    #     self.initialized_vars.add(name)
     
     def get_label(self, name: str) -> Optional[MultiLabel]:
         """
