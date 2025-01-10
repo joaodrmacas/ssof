@@ -152,11 +152,7 @@ class ASTAnalyzer:
         callee = node.get('callee', {})
         arguments = node.get('arguments', [])
 
-        self.initialized_vars.append(callee.get('name'))
         path.append(" " * depth + "CALL")
-
-        # First evaluate the callee expression to get its label
-        callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
 
         # Get arguments' labels
         args_mlbls: List[MultiLabel] = []
@@ -166,27 +162,28 @@ class ASTAnalyzer:
 
         # Get the function name - handle both direct calls and member expressions
         func_name = None
+        property_node = None
+        object_name = None
         if callee.get('type') == 'Identifier':
             func_name = callee.get('name')
+            self.initialized_vars.append(callee.get('name'))
         elif callee.get('type') == 'MemberExpression':
             # Handle cases like document.write
             property_node = callee.get('property', {})
-            if property_node.get('type') == 'Identifier':
-                func_name = property_node.get('name')
+            object_name = callee.get('object', {}).get('name', 'unknown')
+            func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
+            self.initialized_vars.append(func_name)
+            self.initialized_vars.append(property_node.get('name', 'unknown'))
 
-                # For member expressions, also include the full path (e.g., "document.write")
-                object_name = callee.get('object', {}).get('name')
-                if object_name:
-                    full_name = f"{object_name}.{func_name}"
-                    # Check if the full name is a sink or sanitizer
-                    if (self.policy.get_vulnerabilities_for_sink(full_name) or
-                            self.policy.get_vulnerabilities_for_sanitizer(full_name)):
-                        func_name = full_name
+        # Evaluate the callee expression to get its label
+        callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
 
+        print(f"Calling {func_name} at line {get_line(node)}")
         sanitized_mlbl = None
         if func_name:
             # Check if this is a sanitizer call
-            vuln_patterns = self.policy.get_vulnerabilities_for_sanitizer(func_name)
+            vuln_patterns = self.policy.get_vulnerabilities_for_sanitizer(
+                func_name)
             if vuln_patterns and args_mlbls:
 
                 sanitized_mlbl = MultiLabel(self.policy.patterns.values())
@@ -195,12 +192,10 @@ class ASTAnalyzer:
                 for arg_mlbl in args_mlbls:
                     sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
 
-                
-
-                #print("\nINI args_mlbls:")
+                # print("\nINI args_mlbls:")
                 # for arg_mlbl in args_mlbls:
-                    #print(arg_mlbl)
-                #print("END args_mlbls\n")
+                    # print(arg_mlbl)
+                # print("END args_mlbls\n")
 
                 print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
                 # For each argument that was passed to the sanitizer
@@ -210,21 +205,22 @@ class ASTAnalyzer:
                     for pattern_name, pattern in self.policy.patterns.items():
                         if pattern_name not in vuln_patterns:
                             continue
-                        label = copy.deepcopy(arg_mlbl.get_label_for_pattern(pattern_name))
+                        label = copy.deepcopy(
+                            arg_mlbl.get_label_for_pattern(pattern_name))
                         if not label:
                             continue
                         for source in label.get_sources():
                             for src_line in label.get_source_lines(source):
                                 sanitized_mlbl.labels[pattern_name].add_source(
-                                            source, src_line)
-                            if source not in already_sanitized: 
+                                    source, src_line)
+                            if source not in already_sanitized:
                                 sanitized_mlbl.labels[pattern_name].add_sanitizer(
                                     source,
                                     func_name,
                                     get_line(node)
                                 )
                                 already_sanitized.append(source)
-                
+
                 print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
             # Check if this is a sink call
@@ -232,7 +228,7 @@ class ASTAnalyzer:
             if vuln_patterns:
                 # Combine all argument labels to check what's flowing into the sink
                 combined_lbl = None
-                
+
                 print(f"CALLEE {callee} LABEL : ", callee_lbl)
                 print(f"\nINI ARGS LABELS : ")
                 for arg_lbl in args_mlbls:
@@ -252,6 +248,16 @@ class ASTAnalyzer:
                         get_line(node),
                         combined_lbl
                     )
+                    if property_node:
+                        self.vulnerabilites.add_illegal_flows(
+                            property_node.get('name', 'unknown'),
+                            get_line(node),
+                            combined_lbl
+                        )
+                    if object_name:
+                        self.vulnerabilites.add_illegal_flows(
+                            object_name, get_line(node), combined_lbl
+                        )
 
         print(f"######## CALLEE {callee} LABEL : ", callee_lbl)
         print(f"\nINI ARGS LABELS : ")
@@ -262,7 +268,7 @@ class ASTAnalyzer:
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
         result_lbl = callee_lbl if callee_lbl else MultiLabel(
             list(self.policy.patterns.values()))
-        
+
         # If we have a sanitized label, use that instead of combining the raw argument labels
         if sanitized_mlbl:
             result_lbl = result_lbl.combine(sanitized_mlbl)
@@ -270,9 +276,8 @@ class ASTAnalyzer:
             # Otherwise combine with the original argument labels
             for arg_lbl in args_mlbls:
                 result_lbl = result_lbl.combine(arg_lbl)
-        
 
-        print(f"{callee.get("name")} : RETURN VISIT CALL : {result_lbl}")
+        print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
 
     def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
@@ -282,35 +287,65 @@ class ASTAnalyzer:
         return copy.deepcopy(mlbl_ing)
 
     def visit_member_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
-        """Visit a member access expression (e.g., obj.prop)"""
-        object_node = node.get('object', {})
-        property_node = node.get('property', {})
-
+        """
+        Visit a member access expression (e.g., obj.prop).
+        This should behave similarly to visit_identifier, but for 'obj.prop'.
+        We do NOT do sink checks here (that's in call or assignment).
+        """
         path.append(" " * depth + "MEMBER ACCESS")
 
-        # Get labels from both object and property
+        object_node = node.get('object', {})
+        property_node = node.get('property', {})
+        line_no = get_line(node)
+
+        # 1) Recursively visit the object and property sub-expressions
         object_label = self.visit_expression(
             object_node, mlbl_ing, path, depth + 2)
         property_label = self.visit_expression(
             property_node, mlbl_ing, path, depth + 2)
 
-        # Both object and property access are considered tainted
-        if not object_label:
-            object_name = object_node.get('name', 'unknown_object')
-            object_label = MultiLabel(list(self.policy.patterns.values()))
-
-        if not property_label and not node.get('computed', False):
-            prop_name = property_node.get('name', 'unknown_property')
-            property_label = MultiLabel(list(self.policy.patterns.values()))
-
-        # Combine labels
-        # TODO: checkar se isso é o certo
-        if object_label and property_label:
-            return copy.deepcopy(object_label.combine(property_label))
+        # 2) Combine object_label and property_label
+        combined_label = MultiLabel(list(self.policy.patterns.values()))
         if object_label:
-            return copy.deepcopy(object_label)
+            combined_label = combined_label.combine(object_label)
+        if property_label:
+            combined_label = combined_label.combine(property_label)
 
-        return copy.deepcopy(property_label)
+        # 3) Create a "name" for this member expression (similar to how we do in visit_identifier)
+        #    For example, if both are Identifiers:
+        if (object_node.get('type') == 'Identifier' and
+                property_node.get('type') == 'Identifier'):
+            full_name = f"{object_node.get('name')}.{property_node.get('name')}"
+        else:
+            # If object or property are more complex, fallback to something unique
+            full_name = f"member@line{line_no}"
+
+        # 4) Retrieve the current label for this "variable" (if any)
+        existing_label = mlbl_ing.get_label(full_name)
+
+        if existing_label:
+            # Combine existing label with whatever we found above
+            new_label = existing_label.combine(combined_label)
+        else:
+            # Otherwise, we'll treat combined_label as the new label
+            new_label = combined_label
+
+        # 5) Mirroring visit_identifier: if we haven't seen full_name yet, treat as "global source"
+        #    (This is optional, depending on how your analysis rules define uninitialized members.)
+        if not self.is_variable_initialized(full_name):
+            new_label.add_global_source(full_name, line_no)
+            new_label.add_global_source(object_node.get('name'), line_no)
+            self.initialized_vars.append(full_name)
+        else:
+            # Otherwise, treat it like a known source
+            new_label.add_source(object_node.get('name'), line_no)
+            new_label.add_source(full_name, line_no)
+
+        # 6) Update MultiLabelling
+        print(f"MEMBER EXPR LBL: {new_label}")
+        mlbl_ing.update_label(full_name, new_label)
+
+        return copy.deepcopy(new_label)
 
     def visit_block_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
         """Visit a block statement (sequence of statements)"""
@@ -335,48 +370,74 @@ class ASTAnalyzer:
         # Get the label from the right-hand expression
         right_label = self.visit_expression(right, mlbl_ing, path)
 
-        if right_label:
-            # Handle assignment to identifiers
+        if not right_label:
+            return MultiLabel([])
+
+        # Handle assignment to identifiers
+        if isinstance(left, dict) and left.get('type') == 'Identifier':
             self.initialized_vars.append(left.get('name'))
-            if isinstance(left, dict) and left.get('type') == 'Identifier':
-                left_name = left.get('name')
-                if left_name:
-                    # Check if the left-hand variable is a sink
-                    vuln_patterns = self.policy.get_vulnerabilities_for_sink(
-                        left_name)
-                    left_label = copy.deepcopy(right_label)
+            left_name = left.get('name')
+            if left_name:
+                # Check if the left-hand variable is a sink
+                vuln_patterns = self.policy.get_vulnerabilities_for_sink(
+                    left_name)
+                left_label = copy.deepcopy(right_label)
 
-                    if vuln_patterns:
-                        # Check for illegal flows to this sink
-                        self.vulnerabilites.add_illegal_flows(
-                            left_name,
-                            get_line(node),
-                            left_label
-                        )
+                if vuln_patterns:
+                    # Check for illegal flows to this sink
+                    self.vulnerabilites.add_illegal_flows(
+                        left_name,
+                        get_line(node),
+                        left_label
+                    )
 
-                    # # Update the variable's label in the multilabelling
-                    left_label.add_source(left_name, -1)
-                    mlbl_ing.update_label(left_name, left_label)
+                # # Update the variable's label in the multilabelling
+                left_label.add_source(left_name, -1)
+                mlbl_ing.update_label(left_name, left_label)
 
-            # Handle assignment to member expressions (e.g., obj.prop = value)
-            # TODO:
-            elif isinstance(left, dict) and left.get('type') == 'MemberExpression':
-                property_node = left.get('property', {})
-                if property_node.get('type') == 'Identifier':
-                    prop_name = property_node.get('name')
-                    object_node = left.get('object', {})
-                    if object_node.get('type') == 'Identifier':
-                        object_name = object_node.get('name')
-                        # Check if the full property access is a sink (e.g., document.cookie)
-                        full_name = f"{object_name}.{prop_name}"
-                        vuln_patterns = self.policy.get_vulnerabilities_for_sink(
-                            full_name)
-                        if vuln_patterns:
-                            self.vulnerabilites.add_illegal_flows(
-                                full_name,
-                                get_line(node),
-                                right_label
-                            )
+        # Handle assignment to member expressions (e.g., obj.prop = value)
+        # TODO:
+        elif isinstance(left, dict) and left.get('type') == 'MemberExpression':
+            property_node = left.get('property', {})
+            object_node = left.get('object', {})
+            if property_node.get('type') == 'Identifier' and object_node.get('type') == 'Identifier':
+                prop_name = property_node.get('name')
+                object_name = object_node.get('name')
+                left_name = f"{object_name}.{prop_name}"
+                left_label = copy.deepcopy(right_label)
+
+                # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
+                self.initialized_vars.append(left_name)
+                self.initialized_vars.append(prop_name)
+
+                # Check if full_name OR just object_name OR just prop_name is a sink
+                # (Depending on how you want to handle patterns—some treat `obj.prop`
+                # as the sink, others treat just `prop_name` as a sink, etc.)
+                combined_sinks = (
+                    self.policy.get_vulnerabilities_for_sink(left_name)
+                    | self.policy.get_vulnerabilities_for_sink(prop_name)
+                    | self.policy.get_vulnerabilities_for_sink(object_name)
+                )
+                if combined_sinks:
+                    print("SINKS:", combined_sinks)
+                    # If any pattern sees this as a sink, record the flows
+                    self.vulnerabilites.add_illegal_flows(
+                        object_name,                # or just `prop_name`, whichever you prefer
+                        get_line(node),
+                        left_label
+                    )
+
+                    self.vulnerabilites.add_illegal_flows(
+                        prop_name,                # or just `prop_name`, whichever you prefer
+                        get_line(node),
+                        left_label
+                    )
+                    print(self.vulnerabilites.get_report())
+
+                left_label.add_source(left_name, -1)
+                left_label.add_source(object_name, -1)
+                print(f"LEFT LABEL: {left_label}")
+                mlbl_ing.update_label(left_name, left_label)
 
         # FIXME: why return a empty multilabel
         return copy.deepcopy(MultiLabel([]))
