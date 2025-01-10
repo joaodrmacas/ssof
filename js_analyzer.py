@@ -41,7 +41,7 @@ def main():
         # Parse JavaScript file
         ast = parse_javascript(js_file)
         with open(output_file.replace("actual", "ast"), "w") as f:
-            json.dump(ast, f)
+            json.dump(ast, f, indent=4)
 
         # Load patterns
         patterns = load_patterns(pattern_file)

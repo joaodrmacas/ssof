@@ -3,6 +3,15 @@ import subprocess
 import sys
 import json
 
+class bcolors:
+    # https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
+    PURPLE =    '\033[95m'
+    GREEN =     '\033[92m'
+    YELLOW =    '\033[93m'
+    RED =       '\033[91m'
+    ENDC =      '\033[0m'
+    BOLD =      '\033[1m'
+    UNDERLINE = '\033[4m'
 
 def run_tests(max_slice):
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,7 +56,8 @@ def run_tests(max_slice):
                 command = [
                     "python3", "js_analyzer.py", js_file, patterns_file
                 ]
-                print(f"Running: {' '.join(command)}")
+                print("\n\n" + "#" * 80)
+                print(f"{bcolors.PURPLE}[NEW TEST]{bcolors.ENDC} Running: {' '.join(command)}")
 
                 try:
                     subprocess.run(command, check=True,
