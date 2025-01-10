@@ -197,6 +197,10 @@ class MultiLabel:
                 other.labels[pattern_name]
             )
         
+        for pattern_name in other.patterns:
+            if pattern_name not in new_multilabel.patterns:
+                new_multilabel.patterns[pattern_name] = copy.deepcopy(other.labels[pattern_name])
+
         return new_multilabel
 
     def __str__(self):
