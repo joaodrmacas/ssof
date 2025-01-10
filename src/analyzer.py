@@ -20,12 +20,7 @@ class ASTAnalyzer:
     def __init__(self, ast, policy: Policy, multilabelling: MultiLabelling, vulnerabilities: Vulnerabilities):
         self.ast = ast
         self.policy = policy
-        self.multillabeling = multilabelling
         self.vulnerabilites = vulnerabilities
-        self.initialized_vars = []
-
-    def is_variable_initialized(self, var_name: str) -> bool:
-        return var_name in self.initialized_vars
 
     def traverse_ast(self, node=None, depth=0):
         """
@@ -115,7 +110,8 @@ class ASTAnalyzer:
             return mlbl
 
         mlbl = MultiLabel(list(self.policy.patterns.values()))
-        if not self.is_variable_initialized(name):
+        
+        if not mlbl_ing.is_initialized_vars(name):
             mlbl.add_global_source(name, get_line(node))
         else:
             mlbl.add_source(name, get_line(node))
@@ -166,14 +162,15 @@ class ASTAnalyzer:
         object_name = None
         if callee.get('type') == 'Identifier':
             func_name = callee.get('name')
-            self.initialized_vars.append(callee.get('name'))
+            mlbl_ing.add_initialized_vars(func_name)
         elif callee.get('type') == 'MemberExpression':
             # Handle cases like document.write
             property_node = callee.get('property', {})
             object_name = callee.get('object', {}).get('name', 'unknown')
             func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
-            self.initialized_vars.append(func_name)
-            self.initialized_vars.append(property_node.get('name', 'unknown'))
+            # funcs are not treated as unitialized vars
+            mlbl_ing.add_initialized_vars(func_name)
+            mlbl_ing.add_initialized_vars(property_node.get('name', 'unknown'))
 
         # Evaluate the callee expression to get its label
         callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
@@ -197,7 +194,7 @@ class ASTAnalyzer:
                     # print(arg_mlbl)
                 # print("END args_mlbls\n")
 
-                print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
+                # print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
                 # For each argument that was passed to the sanitizer
                 already_sanitized = []
                 for arg_mlbl in args_mlbls:
@@ -221,7 +218,7 @@ class ASTAnalyzer:
                                 )
                                 already_sanitized.append(source)
 
-                print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
+                # print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
             # Check if this is a sink call
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
@@ -229,17 +226,17 @@ class ASTAnalyzer:
                 # Combine all argument labels to check what's flowing into the sink
                 combined_lbl = None
 
-                print(f"CALLEE {callee} LABEL : ", callee_lbl)
-                print(f"\nINI ARGS LABELS : ")
+                # print(f"CALLEE {callee} LABEL : ", callee_lbl)
+                # print(f"\nINI ARGS LABELS : ")
                 for arg_lbl in args_mlbls:
                     if combined_lbl is None:
                         combined_lbl = copy.deepcopy(arg_lbl)
                     else:
                         combined_lbl = combined_lbl.combine(arg_lbl)
-                    print(arg_lbl)
-                print(f"END ARGS LABELS\n")
+                #     print(arg_lbl)
+                # print(f"END ARGS LABELS\n")
 
-                print("******** COMBINED : ", combined_lbl)
+                # print("******** COMBINED : ", combined_lbl)
 
                 if combined_lbl:
                     # Add this sink usage to the vulnerabilities tracking
@@ -259,7 +256,7 @@ class ASTAnalyzer:
                             object_name, get_line(node), combined_lbl
                         )
 
-        print(f"######## CALLEE {callee} LABEL : ", callee_lbl)
+        print(f"CALLEE {callee} LABEL : ", callee_lbl)
         print(f"\nINI ARGS LABELS : ")
         for arg_mlbl in args_mlbls:
             print(arg_mlbl)
@@ -277,7 +274,7 @@ class ASTAnalyzer:
             for arg_lbl in args_mlbls:
                 result_lbl = result_lbl.combine(arg_lbl)
 
-        print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
+        # print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
 
     def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
@@ -319,6 +316,9 @@ class ASTAnalyzer:
         else:
             # If object or property are more complex, fallback to something unique
             full_name = f"member@line{line_no}"
+            print('WARNING: NOT SUPPOSE TO HAPPEN?')
+            print('WARNING: NOT SUPPOSE TO HAPPEN?')
+            print('WARNING: NOT SUPPOSE TO HAPPEN?')
 
         # 4) Retrieve the current label for this "variable" (if any)
         existing_label = mlbl_ing.get_label(full_name)
@@ -332,10 +332,10 @@ class ASTAnalyzer:
 
         # 5) Mirroring visit_identifier: if we haven't seen full_name yet, treat as "global source"
         #    (This is optional, depending on how your analysis rules define uninitialized members.)
-        if not self.is_variable_initialized(full_name):
+        if not mlbl_ing.is_initialized_vars(full_name):
             new_label.add_global_source(full_name, line_no)
             new_label.add_global_source(object_node.get('name'), line_no)
-            self.initialized_vars.append(full_name)
+            mlbl_ing.add_initialized_vars(full_name)
         else:
             # Otherwise, treat it like a known source
             new_label.add_source(object_node.get('name'), line_no)
@@ -375,7 +375,7 @@ class ASTAnalyzer:
 
         # Handle assignment to identifiers
         if isinstance(left, dict) and left.get('type') == 'Identifier':
-            self.initialized_vars.append(left.get('name'))
+            mlbl_ing.add_initialized_vars(left.get('name'))
             left_name = left.get('name')
             if left_name:
                 # Check if the left-hand variable is a sink
@@ -407,8 +407,8 @@ class ASTAnalyzer:
                 left_label = copy.deepcopy(right_label)
 
                 # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
-                self.initialized_vars.append(left_name)
-                self.initialized_vars.append(prop_name)
+                mlbl_ing.add_initialized_vars(left_name)
+                mlbl_ing.add_initialized_vars(prop_name)
 
                 # Check if full_name OR just object_name OR just prop_name is a sink
                 # (Depending on how you want to handle patterns—some treat `obj.prop`
@@ -445,15 +445,31 @@ class ASTAnalyzer:
     def visit_program(self, node: Dict, path: List[str], depth=0):
         path.append(" " * depth + "PROGRAM")
 
-        mlbl_ing = MultiLabelling()
+        mlbl_arr = [MultiLabelling()]
         for n in node["body"]:
             if "statement" in n.get('type').lower():
-                mulbl_ing = self.visit_statement(n, mlbl_ing, path, depth + 2)
-
+                curr_idx = 0
+                while curr_idx < len(mlbl_arr):
+                    if n.get('type') == 'IfStatement':
+                        new_mlbl = mlbl_arr[curr_idx].create_copy()
+                        mlbl_arr.append(new_mlbl)
+                        curr_idx+=1
+                    mlbl_arr[curr_idx] = self.visit_statement(n, mlbl_arr[curr_idx], path, depth + 2)
+                    curr_idx+=1
             else:
                 print("NOT A STATEMENT ABORTING")
                 print("NOT A STATEMENT ABORTING")
                 print("NOT A STATEMENT ABORTING")
+ 
+        mltlbl = MultiLabelling()
+        print('*************')
+        for mlbling in mlbl_arr:
+            print("MLBLING: ")
+            for key, value in mlbling.labelling.items():
+                print(f"{key} : {value}")
+            mltlbl.combine(mlbling)
+            print()
+        print('*************')
 
     def visit_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
         if not isinstance(node, dict):
@@ -526,3 +542,15 @@ class ASTAnalyzer:
 
 def get_line(node):
     return node.get("loc").get("start").get("line")
+    
+
+def is_part_of(member, full):
+    # Split `f` into segments by '.' and check if `m` is a valid sequence of segments
+    f_segments = full.split('.')
+    m_segments = member.split('.')
+
+    # Traverse `f` as a sequence to find if `m` exists
+    for i in range(len(f_segments) - len(m_segments) + 1):
+        if f_segments[i:i+len(m_segments)] == m_segments:
+            return True
+    return False
