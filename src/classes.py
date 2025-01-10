@@ -299,13 +299,13 @@ class MultiLabelling:
         Initialize a MultiLabelling object.        
         """
         self.labelling: Dict[str, MultiLabel] = {}
-    #     self.initialized_vars = set()
+        self.initialized_vars = set()
 
-    # def is_initialized_vars(self, name: str) -> bool:
-    #     return name in self.initialized_vars
+    def is_initialized_vars(self, name: str) -> bool:
+        return name in self.initialized_vars
     
-    # def add_initialized_vars(self, name: str):
-    #     self.initialized_vars.add(name)
+    def add_initialized_vars(self, name: str):
+        self.initialized_vars.add(name)
     
     def get_label(self, name: str) -> Optional[MultiLabel]:
         """

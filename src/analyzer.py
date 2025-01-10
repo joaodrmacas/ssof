@@ -21,10 +21,6 @@ class ASTAnalyzer:
         self.ast = ast
         self.policy = policy
         self.vulnerabilites = vulnerabilities
-        self.initialized_vars = []
-
-    def is_initialized_var(self, var_name: str) -> bool:
-        return var_name in self.initialized_vars
 
     def traverse_ast(self, node=None, depth=0):
         """
@@ -115,7 +111,7 @@ class ASTAnalyzer:
 
         mlbl = MultiLabel(list(self.policy.patterns.values()))
         
-        if not self.is_initialized_var(name):
+        if not mlbl_ing.is_initialized_vars(name):
             mlbl.add_global_source(name, get_line(node))
         else:
             mlbl.add_source(name, get_line(node))
@@ -166,15 +162,15 @@ class ASTAnalyzer:
         object_name = None
         if callee.get('type') == 'Identifier':
             func_name = callee.get('name')
-            self.initialized_vars.append(func_name)
+            mlbl_ing.add_initialized_vars(func_name)
         elif callee.get('type') == 'MemberExpression':
             # Handle cases like document.write
             property_node = callee.get('property', {})
             object_name = callee.get('object', {}).get('name', 'unknown')
             func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
             # funcs are not treated as unitialized vars
-            self.initialized_vars.append(func_name)
-            self.initialized_vars.append(property_node.get('name', 'unknown'))
+            mlbl_ing.add_initialized_vars(func_name)
+            mlbl_ing.add_initialized_vars(property_node.get('name', 'unknown'))
 
         # Evaluate the callee expression to get its label
         callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
@@ -336,10 +332,10 @@ class ASTAnalyzer:
 
         # 5) Mirroring visit_identifier: if we haven't seen full_name yet, treat as "global source"
         #    (This is optional, depending on how your analysis rules define uninitialized members.)
-        if not self.is_initialized_var(full_name):
+        if not mlbl_ing.is_initialized_vars(full_name):
             new_label.add_global_source(full_name, line_no)
             new_label.add_global_source(object_node.get('name'), line_no)
-            self.initialized_vars.append(full_name)
+            mlbl_ing.add_initialized_vars(full_name)
         else:
             # Otherwise, treat it like a known source
             new_label.add_source(object_node.get('name'), line_no)
@@ -379,7 +375,7 @@ class ASTAnalyzer:
 
         # Handle assignment to identifiers
         if isinstance(left, dict) and left.get('type') == 'Identifier':
-            self.initialized_vars.append(left.get('name'))
+            mlbl_ing.add_initialized_vars(left.get('name'))
             left_name = left.get('name')
             if left_name:
                 # Check if the left-hand variable is a sink
@@ -411,8 +407,8 @@ class ASTAnalyzer:
                 left_label = copy.deepcopy(right_label)
 
                 # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
-                self.initialized_vars.append(left_name)
-                self.initialized_vars.append(prop_name)
+                mlbl_ing.add_initialized_vars(left_name)
+                mlbl_ing.add_initialized_vars(prop_name)
 
                 # Check if full_name OR just object_name OR just prop_name is a sink
                 # (Depending on how you want to handle patterns—some treat `obj.prop`

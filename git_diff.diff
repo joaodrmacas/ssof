@@ -1,0 +1,431 @@
+diff --git a/.gitignore b/.gitignore
+index 3a016fb..f2d7687 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,5 +2,3 @@ debug_python.txt
+ __pycache__
+ .vscode
+ **venv/
+-output/
+-slices/
+diff --git a/js_analyzer.py b/js_analyzer.py
+index 3ac27fe..e75ac8b 100644
+--- a/js_analyzer.py
++++ b/js_analyzer.py
+@@ -41,7 +41,7 @@ def main():
+         # Parse JavaScript file
+         ast = parse_javascript(js_file)
+         with open(output_file.replace("actual", "ast"), "w") as f:
+-            json.dump(ast, f)
++            json.dump(ast, f, indent=4)
+ 
+         # Load patterns
+         patterns = load_patterns(pattern_file)
+diff --git a/run_tests.py b/run_tests.py
+index 618d2d2..7c7b360 100644
+--- a/run_tests.py
++++ b/run_tests.py
+@@ -3,6 +3,15 @@ import subprocess
+ import sys
+ import json
+ 
++class bcolors:
++    # https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
++    PURPLE =    '\033[95m'
++    GREEN =     '\033[92m'
++    YELLOW =    '\033[93m'
++    RED =       '\033[91m'
++    ENDC =      '\033[0m'
++    BOLD =      '\033[1m'
++    UNDERLINE = '\033[4m'
+ 
+ def run_tests(max_slice):
+     base_dir = os.path.dirname(os.path.abspath(__file__))
+@@ -47,9 +56,10 @@ def run_tests(max_slice):
+                 command = [
+                     "python3", "js_analyzer.py", js_file, patterns_file
+                 ]
+-                print(f"Running: {' '.join(command)}")
++                print("\n\n" + "#" * 80)
++                print(f"{bcolors.PURPLE}[NEW TEST]{bcolors.ENDC} Running: {' '.join(command)}")
+ 
+-                try:
++                try:    
+                     subprocess.run(command, check=True,
+                                    stdout=subprocess.DEVNULL)
+                 except subprocess.CalledProcessError as e:
+diff --git a/src/analyzer.py b/src/analyzer.py
+index f9d86c2..2f38105 100644
+--- a/src/analyzer.py
++++ b/src/analyzer.py
+@@ -13,19 +13,13 @@ class Trace:
+     def __str__(self) -> str:
+         return " -> ".join(self.steps)
+ 
+-
+ class ASTAnalyzer:
+     MAX_LOOP_DEPTH = 3
+ 
+     def __init__(self, ast, policy: Policy, multilabelling: MultiLabelling, vulnerabilities: Vulnerabilities):
+         self.ast = ast
+         self.policy = policy
+-        self.multillabeling = multilabelling
+         self.vulnerabilites = vulnerabilities
+-        self.initialized_vars = []
+-
+-    def is_variable_initialized(self, var_name: str) -> bool:
+-        return var_name in self.initialized_vars
+ 
+     def traverse_ast(self, node=None, depth=0):
+         """
+@@ -73,11 +67,16 @@ class ASTAnalyzer:
+ 
+         alt_mlbl_ing = mlbl_ing.create_copy()
+ 
++        print("IF IN LINE ", get_line(node))
++
+         # Traverse the 'consequent' branch
+         consequent = node.get('consequent', {}).get('body', [])
+         for statement in consequent:
+             mlbl_ing = self.visit_statement(
+                 statement, mlbl_ing, path, depth + 2)
++        print("END OF IF IN LINE ", get_line(node))
++        print("MULTILABBELING: ", mlbl_ing)
++        print()
+ 
+         # Traverse the 'alternate' branch, if present
+         alternate = node.get('alternate', {}).get('body', [])
+@@ -86,9 +85,12 @@ class ASTAnalyzer:
+             for statement in alternate:
+                 alt_mlbl_ing = self.visit_statement(
+                     statement, alt_mlbl_ing, path, depth + 2)
++                print("STATEMENT ON ALTERNATE: ", statement)
++        
++        print("ELSE FROM IF IN LINE ", get_line(node))
++        print("ELSE MULTILABBELING: ", alt_mlbl_ing)
+ 
+         path.append(" " * depth + "END IF")
+-
+         return copy.deepcopy(mlbl_ing.combine(alt_mlbl_ing))
+ 
+     def visit_literal(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
+@@ -115,7 +117,8 @@ class ASTAnalyzer:
+             return mlbl
+ 
+         mlbl = MultiLabel(list(self.policy.patterns.values()))
+-        if not self.is_variable_initialized(name):
++        # FIXME: sources are not being everytime added
++        if not mlbl_ing.is_initialized_var:
+             mlbl.add_global_source(name, get_line(node))
+         else:
+             mlbl.add_source(name, get_line(node))
+@@ -166,14 +169,17 @@ class ASTAnalyzer:
+         object_name = None
+         if callee.get('type') == 'Identifier':
+             func_name = callee.get('name')
+-            self.initialized_vars.append(callee.get('name'))
++            # funcs are not treated as unitialized vars
++            mlbl_ing.add_initialized_var(func_name)
++
+         elif callee.get('type') == 'MemberExpression':
+             # Handle cases like document.write
+             property_node = callee.get('property', {})
+             object_name = callee.get('object', {}).get('name', 'unknown')
+             func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
+-            self.initialized_vars.append(func_name)
+-            self.initialized_vars.append(property_node.get('name', 'unknown'))
++            # funcs are not treated as unitialized vars
++            mlbl_ing.add_initialized_var.append(func_name)
++            mlbl_ing.add_initialized_var.append(property_node.get('name', 'unknown'))
+ 
+         # Evaluate the callee expression to get its label
+         callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
+@@ -197,7 +203,7 @@ class ASTAnalyzer:
+                     # print(arg_mlbl)
+                 # print("END args_mlbls\n")
+ 
+-                print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
++                #print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
+                 # For each argument that was passed to the sanitizer
+                 already_sanitized = []
+                 for arg_mlbl in args_mlbls:
+@@ -221,7 +227,7 @@ class ASTAnalyzer:
+                                 )
+                                 already_sanitized.append(source)
+ 
+-                print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
++                #print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
+ 
+             # Check if this is a sink call
+             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
+@@ -229,17 +235,18 @@ class ASTAnalyzer:
+                 # Combine all argument labels to check what's flowing into the sink
+                 combined_lbl = None
+ 
+-                print(f"CALLEE {callee} LABEL : ", callee_lbl)
+-                print(f"\nINI ARGS LABELS : ")
++                # print(f"CALLEE {callee} LABEL : ", callee_lbl)
++                # print(f"\nINI ARGS LABELS : ")
+                 for arg_lbl in args_mlbls:
+                     if combined_lbl is None:
+                         combined_lbl = copy.deepcopy(arg_lbl)
+                     else:
+                         combined_lbl = combined_lbl.combine(arg_lbl)
+-                    print(arg_lbl)
+-                print(f"END ARGS LABELS\n")
++                    #print(arg_lbl)
++                # print(f"END ARGS LABELS\n")
++                # print()
+ 
+-                print("******** COMBINED : ", combined_lbl)
++                #print("******** COMBINED : ", combined_lbl)
+ 
+                 if combined_lbl:
+                     # Add this sink usage to the vulnerabilities tracking
+@@ -259,7 +266,7 @@ class ASTAnalyzer:
+                             object_name, get_line(node), combined_lbl
+                         )
+ 
+-        print(f"######## CALLEE {callee} LABEL : ", callee_lbl)
++        print(f" CALLEE {callee} LABEL : ", callee_lbl)
+         print(f"\nINI ARGS LABELS : ")
+         for arg_mlbl in args_mlbls:
+             print(arg_mlbl)
+@@ -277,7 +284,7 @@ class ASTAnalyzer:
+             for arg_lbl in args_mlbls:
+                 result_lbl = result_lbl.combine(arg_lbl)
+ 
+-        print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
++        #print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
+         return copy.deepcopy(result_lbl)
+ 
+     def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
+@@ -319,6 +326,9 @@ class ASTAnalyzer:
+         else:
+             # If object or property are more complex, fallback to something unique
+             full_name = f"member@line{line_no}"
++            print('WARNING: NOT SUPPOSE TO HAPPEN?')
++            print('WARNING: NOT SUPPOSE TO HAPPEN?')
++            print('WARNING: NOT SUPPOSE TO HAPPEN?')
+ 
+         # 4) Retrieve the current label for this "variable" (if any)
+         existing_label = mlbl_ing.get_label(full_name)
+@@ -332,10 +342,9 @@ class ASTAnalyzer:
+ 
+         # 5) Mirroring visit_identifier: if we haven't seen full_name yet, treat as "global source"
+         #    (This is optional, depending on how your analysis rules define uninitialized members.)
+-        if not self.is_variable_initialized(full_name):
++        if not self.is_initialized_variable(full_name):
+             new_label.add_global_source(full_name, line_no)
+             new_label.add_global_source(object_node.get('name'), line_no)
+-            self.initialized_vars.append(full_name)
+         else:
+             # Otherwise, treat it like a known source
+             new_label.add_source(object_node.get('name'), line_no)
+@@ -375,7 +384,7 @@ class ASTAnalyzer:
+ 
+         # Handle assignment to identifiers
+         if isinstance(left, dict) and left.get('type') == 'Identifier':
+-            self.initialized_vars.append(left.get('name'))
++            mlbl_ing.add_initialized_var(left.get('name'))
+             left_name = left.get('name')
+             if left_name:
+                 # Check if the left-hand variable is a sink
+@@ -391,8 +400,9 @@ class ASTAnalyzer:
+                         left_label
+                     )
+ 
+-                # # Update the variable's label in the multilabelling
++                # add itself as a source so that its label doesnt forget it is itself a source
+                 left_label.add_source(left_name, -1)
++                # Update the variable's label in the multilabelling
+                 mlbl_ing.update_label(left_name, left_label)
+ 
+         # Handle assignment to member expressions (e.g., obj.prop = value)
+@@ -407,32 +417,28 @@ class ASTAnalyzer:
+                 left_label = copy.deepcopy(right_label)
+ 
+                 # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
+-                self.initialized_vars.append(left_name)
+-                self.initialized_vars.append(prop_name)
+-
+-                # Check if full_name OR just object_name OR just prop_name is a sink
+-                # (Depending on how you want to handle patterns—some treat `obj.prop`
+-                # as the sink, others treat just `prop_name` as a sink, etc.)
+-                combined_sinks = (
+-                    self.policy.get_vulnerabilities_for_sink(left_name)
+-                    | self.policy.get_vulnerabilities_for_sink(prop_name)
+-                    | self.policy.get_vulnerabilities_for_sink(object_name)
++                mlbl_ing.add_initialized_var(left_name)
++                mlbl_ing.add_initialized_var(prop_name)
++
++                self.vulnerabilites.add_illegal_flows(
++                    left_name,                
++                    get_line(node),
++                    left_label
+                 )
+-                if combined_sinks:
+-                    print("SINKS:", combined_sinks)
+-                    # If any pattern sees this as a sink, record the flows
+-                    self.vulnerabilites.add_illegal_flows(
+-                        object_name,                # or just `prop_name`, whichever you prefer
+-                        get_line(node),
+-                        left_label
+-                    )
+ 
+-                    self.vulnerabilites.add_illegal_flows(
+-                        prop_name,                # or just `prop_name`, whichever you prefer
+-                        get_line(node),
+-                        left_label
+-                    )
+-                    print(self.vulnerabilites.get_report())
++                self.vulnerabilites.add_illegal_flows(
++                    object_name,
++                    get_line(node),
++                    left_label
++                )
++
++                self.vulnerabilites.add_illegal_flows(
++                    prop_name,
++                    get_line(node),
++                    left_label
++                )
++                
++                print(self.vulnerabilites.get_report())
+ 
+                 left_label.add_source(left_name, -1)
+                 left_label.add_source(object_name, -1)
+@@ -445,16 +451,32 @@ class ASTAnalyzer:
+     def visit_program(self, node: Dict, path: List[str], depth=0):
+         path.append(" " * depth + "PROGRAM")
+ 
+-        mlbl_ing = MultiLabelling()
++        mlbl_arr = [MultiLabelling()]
+         for n in node["body"]:
+             if "statement" in n.get('type').lower():
+-                mulbl_ing = self.visit_statement(n, mlbl_ing, path, depth + 2)
+-
++                curr_idx = 0
++                while curr_idx < len(mlbl_arr):
++                    if n.get('type') == 'IfStatement':
++                        new_mlbl = mlbl_arr[curr_idx].create_copy()
++                        mlbl_arr.append(new_mlbl)
++                        curr_idx+=1
++                    mlbl_arr[curr_idx] = self.visit_statement(n, mlbl_arr[curr_idx], path, depth + 2)
++                    curr_idx+=1
+             else:
+                 print("NOT A STATEMENT ABORTING")
+                 print("NOT A STATEMENT ABORTING")
+                 print("NOT A STATEMENT ABORTING")
+ 
++        mltlbl = MultiLabelling()
++        print('*************')
++        for mlbling in mlbl_arr:
++            print("MLBLING: ")
++            for key, value in mlbling.labelling.items():
++                print(f"{key} : {value}")
++            mltlbl.combine(mlbling)
++            print()
++        print('*************')
++
+     def visit_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
+         if not isinstance(node, dict):
+             print("**** FATAL ERROR ****")
+@@ -523,6 +545,16 @@ class ASTAnalyzer:
+ 
+         return copy.deepcopy(self.vulnerabilites)
+ 
+-
+ def get_line(node):
+     return node.get("loc").get("start").get("line")
++
++def is_part_of(member, full):
++    # Split `f` into segments by '.' and check if `m` is a valid sequence of segments
++    f_segments = full.split('.')
++    m_segments = member.split('.')
++
++    # Traverse `f` as a sequence to find if `m` exists
++    for i in range(len(f_segments) - len(m_segments) + 1):
++        if f_segments[i:i+len(m_segments)] == m_segments:
++            return True
++    return False
+diff --git a/src/classes.py b/src/classes.py
+index 1334dee..6388029 100644
+--- a/src/classes.py
++++ b/src/classes.py
+@@ -159,7 +159,7 @@ class MultiLabel:
+         Add a source to all pattern labels.
+         """
+         for pattern_name, pattern in self.patterns.items():
+-            if not pattern.is_source(source) and not pattern.is_sanitizer(source):
++            if not pattern.is_sanitizer(source):
+                 self.labels[pattern_name].add_source(source, line)
+ 
+     def add_source(self, source: str, line: int):
+@@ -298,12 +298,20 @@ class MultiLabelling:
+     """
+     Represents a mapping from variable names to multilabels.
+     """
++
+     def __init__(self):
+         """
+         Initialize a MultiLabelling object.        
+         """
+         self.labelling: Dict[str, MultiLabel] = {}
++        self.initialized_vars = set()
++
++    def is_initialized_var(self, name: str) -> bool:
++        return name in self.initialized_vars
+     
++    def add_initialized_var(self, name: str):
++        self.initialized_vars.add(name)
++        
+     def get_label(self, name: str) -> Optional[MultiLabel]:
+         """
+         Get the multilabel assigned to a name.
+@@ -368,9 +376,43 @@ class MultiLabelling:
+                 combined_labelling.update_label(name, copy.deepcopy(label_other))
+ 
+         return combined_labelling
++
++class Scoping:
++    """
++    Keeps all the multibalellings for the program.
++    """
++
++    def __init__(self):
++        """
++        Initialize a Scoping object.
++        """
++        self.scoping: List[MultiLabelling] = []
++
++    def add_multilabelling(self, multilabelling: MultiLabelling):
++        """
++        Add a multilabelling to the scoping.
++        
++        Args:
++            multilabelling: MultiLabelling to add
++        """
++        self.scoping.append(multilabelling)
+     
+-    def __str__(self):
+-        return f"MultiLabelling(labelling={self.labelling})"
++    def combine(self, other: 'Scoping') -> 'Scoping':
++        """
++        Combine two scopings into a new one where labels reflect
++        the possible outcomes of either scoping.
++
++        Args:
++            other: Another Scoping instance to combine with.
++
++        Returns:
++            A new Scoping instance representing the combination.
++        """
++        combined_scoping = Scoping()
++        
++        combined_scoping.scoping = self.scoping + other.scoping
++        
++        return combined_scoping
+ 
+ class Vulnerabilities:
+     """
