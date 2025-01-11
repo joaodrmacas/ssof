@@ -105,12 +105,6 @@ class ASTAnalyzer:
 
         path.append(" " * depth + "CALL")
 
-        # Get arguments' labels
-        args_mlbls: List[MultiLabel] = []
-        for arg in arguments:
-            arg_lbl = self.visit_expression(arg, mlbl_ing, path, depth + 2)
-            args_mlbls.append(arg_lbl)
-
         # Get the function name - handle both direct calls and member expressions
         func_name = None
         property_node = None
@@ -131,6 +125,14 @@ class ASTAnalyzer:
         callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
 
         print(f"Calling {func_name} at line {get_line(node)}")
+        # Get arguments' labels
+        print("START ARGS LABELS: ")
+        args_mlbls: List[MultiLabel] = []
+        for arg in arguments:
+            arg_lbl = self.visit_expression(arg, mlbl_ing, path, depth + 2)
+            print(arg_lbl)
+            args_mlbls.append(arg_lbl)
+        print("END ARGS LABELS")
         sanitized_mlbl = None
         if func_name:
             # Check if this is a sanitizer call
@@ -138,34 +140,33 @@ class ASTAnalyzer:
                 func_name)
             if vuln_patterns and args_mlbls:
 
-                sanitized_mlbl = MultiLabel(self.policy.patterns.values())
-
                 # Create a new label to represent sanitized output
-                for arg_mlbl in args_mlbls:
-                    sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
-
-                # print("\nINI args_mlbls:")
-                # for arg_mlbl in args_mlbls:
-                #     print(arg_mlbl)
-                # print("END args_mlbls\n")
+                sanitized_mlbl = MultiLabel(self.policy.patterns.values())
 
                 print('BEFORE - SANITIZED LABEL: ', sanitized_mlbl)
                 # For each argument that was passed to the sanitizer
-                for pattern_name in vuln_patterns:
-                    label = copy.deepcopy(
-                        arg_mlbl.get_label_for_pattern(pattern_name))
-                    if not label:
-                        continue
+                for arg_mlbl in args_mlbls:
+                    sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
 
-                    # FIXME: what if there's two sources in the same line
-                    for source, src_line in label.get_sources():
-                        sanitized_mlbl.labels[pattern_name].add_source(source, src_line)
-                        sanitized_mlbl.labels[pattern_name].add_sanitizer(
-                            source,
-                            src_line,
-                            func_name,
-                            get_line(node)
-                        )
+                print('BETWEEN - SANITIZED LABEL: ', sanitized_mlbl)
+                for arg_mlbl in args_mlbls:
+                    for pattern_name in vuln_patterns:
+                        label = copy.deepcopy(
+                            arg_mlbl.get_label_for_pattern(pattern_name))
+                        if not label:
+                            continue
+
+                        # FIXME: what if there's two sources in the same line
+                        for source, src_line in label.get_sources():
+                            print("SOURCES: ", source, src_line)
+                            sanitized_mlbl.labels[pattern_name].add_source(
+                                source, src_line)
+                            sanitized_mlbl.labels[pattern_name].add_sanitizer(
+                                source,
+                                src_line,
+                                func_name,
+                                get_line(node)
+                            )
 
                 print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
@@ -205,12 +206,6 @@ class ASTAnalyzer:
                             object_name, get_line(node), combined_lbl
                         )
 
-        print(f"CALLEE {callee} LABEL : ", callee_lbl)
-        print(f"\nINI ARGS LABELS : ")
-        for arg_mlbl in args_mlbls:
-            print(arg_mlbl)
-        print(f"END ARGS LABELS\n")
-
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
         result_lbl = callee_lbl if callee_lbl else MultiLabel(
             list(self.policy.patterns.values()))
@@ -223,7 +218,7 @@ class ASTAnalyzer:
             for arg_lbl in args_mlbls:
                 result_lbl = result_lbl.combine(arg_lbl)
 
-        # print(f"{func_name} : RETURN VISIT CALL : {result_lbl}")
+        print(f"\n{func_name} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
 
     def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
@@ -426,7 +421,7 @@ class ASTAnalyzer:
             for statement in alternate:
                 else_ing = self.visit_statement(
                     statement, else_ing, path, depth + 2)
-        
+
         path.append(" " * depth + "END IF")
 
         print("#####################")
@@ -523,7 +518,7 @@ class ASTAnalyzer:
 
 def get_line(node):
     return node.get("loc").get("start").get("line")
-    
+
 
 def is_part_of(member, full):
     # Split `f` into segments by '.' and check if `m` is a valid sequence of segments
