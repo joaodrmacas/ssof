@@ -376,8 +376,11 @@ class ASTAnalyzer:
         condition = node.get('test', {}).get('raw', 'condition')
         body = node.get('body', {}).get('body', [])
 
-        final_mlbl_ing = mlbl_ing.create_copy()
-        for i in range(max_repetitions + 1):
+        #label to get the flows of not joining the while
+        initial_mlbl_ing = copy.deepcopy(mlbl_ing)
+
+        final_mlbl_ing = copy.deepcopy(mlbl_ing)
+        for i in range(max_repetitions):
             path.append(" " * depth + f"WHILE ({condition}) iteration {i}")
             for statement in body:
                 mlbl_ing = self.visit_statement(
@@ -385,7 +388,7 @@ class ASTAnalyzer:
 
             final_mlbl_ing = final_mlbl_ing.combine(mlbl_ing)
         path.append(" " * depth + f"EXIT WHILE ({condition})")
-        return copy.deepcopy(mlbl_ing)
+        return copy.deepcopy(mlbl_ing.combine(initial_mlbl_ing))
 
     def visit_if_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0):
         test = node.get('test', {}).get('raw', 'condition')
