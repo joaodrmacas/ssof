@@ -2,5 +2,3 @@ debug_python.txt
 __pycache__
 .vscode
 **venv/
-output/
-slices/

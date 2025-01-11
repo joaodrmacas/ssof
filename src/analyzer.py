@@ -71,7 +71,7 @@ class ASTAnalyzer:
             mlbl.add_global_source(name, get_line(node))
         else:
             mlbl.add_source(name, get_line(node))
-        mlbl_ing.update_label(name, mlbl)
+
         return mlbl
 
     def visit_unary_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
@@ -100,26 +100,32 @@ class ASTAnalyzer:
 
     def visit_call_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
         """Visit a function call expression"""
+
+        def get_function_name(callee):
+            if callee.get('type') == 'Identifier':
+                func_name = callee.get('name')
+                mlbl_ing.add_initialized_vars(func_name)
+                return func_name, None, None
+            elif callee.get('type') == 'MemberExpression':
+                # Handle cases like document.write
+                property_node = callee.get('property', {})
+                object_name = callee.get('object', {}).get('name', 'unknown')
+                func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
+                # funcs are not treated as unitialized vars
+                mlbl_ing.add_initialized_vars(func_name)
+                mlbl_ing.add_initialized_vars(
+                    property_node.get('name', 'unknown'))
+                return func_name, property_node, object_name
+            else:
+                return "unknown", None, None
+
         callee = node.get('callee', {})
         arguments = node.get('arguments', [])
 
         path.append(" " * depth + "CALL")
 
         # Get the function name - handle both direct calls and member expressions
-        func_name = None
-        property_node = None
-        object_name = None
-        if callee.get('type') == 'Identifier':
-            func_name = callee.get('name')
-            mlbl_ing.add_initialized_vars(func_name)
-        elif callee.get('type') == 'MemberExpression':
-            # Handle cases like document.write
-            property_node = callee.get('property', {})
-            object_name = callee.get('object', {}).get('name', 'unknown')
-            func_name = f"{object_name}.{property_node.get('name', 'unknown')}"
-            # funcs are not treated as unitialized vars
-            mlbl_ing.add_initialized_vars(func_name)
-            mlbl_ing.add_initialized_vars(property_node.get('name', 'unknown'))
+        func_name, property_node, object_name = get_function_name(callee)
 
         # Evaluate the callee expression to get its label
         callee_lbl = self.visit_expression(callee, mlbl_ing, path, depth + 2)
@@ -130,7 +136,7 @@ class ASTAnalyzer:
         args_mlbls: List[MultiLabel] = []
         for arg in arguments:
             arg_lbl = self.visit_expression(arg, mlbl_ing, path, depth + 2)
-            print(arg_lbl)
+            print(f"arg {arg.get('name')}: ", arg_lbl)
             args_mlbls.append(arg_lbl)
         print("END ARGS LABELS")
         sanitized_mlbl = None
@@ -149,62 +155,42 @@ class ASTAnalyzer:
                     sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
 
                 print('BETWEEN - SANITIZED LABEL: ', sanitized_mlbl)
-                for arg_mlbl in args_mlbls:
-                    for pattern_name in vuln_patterns:
-                        label = copy.deepcopy(
-                            arg_mlbl.get_label_for_pattern(pattern_name))
-                        if not label:
-                            continue
-
-                        # FIXME: what if there's two sources in the same line
-                        for source, src_line in label.get_sources():
-                            print("SOURCES: ", source, src_line)
-                            sanitized_mlbl.labels[pattern_name].add_source(
-                                source, src_line)
-                            sanitized_mlbl.labels[pattern_name].add_sanitizer(
-                                source,
-                                src_line,
-                                func_name,
-                                get_line(node)
-                            )
+                for pattern_name in vuln_patterns:
+                    for source, src_line in sanitized_mlbl.get_label_for_pattern(pattern_name).get_sources():
+                        sanitized_mlbl.labels[pattern_name].add_sanitizer(
+                            source,
+                            src_line,
+                            func_name,
+                            get_line(node)
+                        )
 
                 print('AFTER - SANITIZED LABEL: ', sanitized_mlbl)
 
             # Check if this is a sink call
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
             if vuln_patterns:
-                # Combine all argument labels to check what's flowing into the sink
-                combined_lbl = None
-
-                # print(f"CALLEE {callee} LABEL : ", callee_lbl)
-                # print(f"\nINI ARGS LABELS : ")
-                for arg_lbl in args_mlbls:
-                    if combined_lbl is None:
-                        combined_lbl = copy.deepcopy(arg_lbl)
-                    else:
-                        combined_lbl = combined_lbl.combine(arg_lbl)
-                #     print(arg_lbl)
-                # print(f"END ARGS LABELS\n")
-
-                # print("******** COMBINED : ", combined_lbl)
-
-                if combined_lbl:
+                print("### INI args_mlbls")
+                for i, arg_mlbl in enumerate(args_mlbls):
+                    print(f"{i}-arg: ", arg_mlbl)
                     # Add this sink usage to the vulnerabilities tracking
                     self.vulnerabilites.add_illegal_flows(
                         func_name,
                         get_line(node),
-                        combined_lbl
+                        arg_mlbl
                     )
                     if property_node:
                         self.vulnerabilites.add_illegal_flows(
                             property_node.get('name', 'unknown'),
                             get_line(node),
-                            combined_lbl
+                            arg_mlbl
                         )
                     if object_name:
                         self.vulnerabilites.add_illegal_flows(
-                            object_name, get_line(node), combined_lbl
+                            object_name,
+                            get_line(node),
+                            arg_mlbl
                         )
+                print("### END args_mlbls")
 
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
         result_lbl = callee_lbl if callee_lbl else MultiLabel(

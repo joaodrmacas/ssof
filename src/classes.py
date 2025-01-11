@@ -81,8 +81,7 @@ class Label:
         :param sanitizer: The sanitizer to be added.
         """
         for flow in self.source_sanitizers[(source, src_line)]:
-            print("LABEL ADD SANITIZER: ", source,
-                  src_line, flow, sanitizer, line)
+            # FIXME: wrongly dont add sanitizer for the case: sanit(sanit(src))
             if [sanitizer, line] not in flow:
                 flow.append([sanitizer, line])
 
@@ -172,9 +171,8 @@ class MultiLabel:
         Only adds to patterns where the source is valid.
         """
         for pattern_name, pattern in self.patterns.items():
-            if pattern.is_source(source) and pattern.is_sanitizer(sanitizer):
-                self.labels[pattern_name].add_sanitizer(
-                    source, src_line, sanitizer, line)
+            self.labels[pattern_name].add_sanitizer(
+                source, src_line, sanitizer, line)
 
     def get_label_for_pattern(self, pattern_name: str):
         """Get the Label object for a specific pattern."""
@@ -422,15 +420,25 @@ class Vulnerabilities:
 
                 # FIXME: why do we even have -1 line?
                 if src_line != -1:
-                    flow_info = {
-                        'sink': [name, line],
-                        'source': [source, src_line],
-                        'unsanitized_flows': "yes" if unsanitized_flows else "no",
-                        'sanitized_flows': sanitized_flows,
-                        # TODO FIXME: False needs to be the actual logic to have the implicit
-                        'implicit': "yes" if False else "no"
-                    }
-                    self.illegal_flows[pattern_name].append(flow_info)
+                    already_added = False
+                    for fi in self.illegal_flows[pattern_name]:
+                        if fi["source"] == [source, src_line] and fi["sink"] == [name, line]:
+                            fi_us = True if fi["unsanitized_flows"] == "yes" else False
+                            fi_us = fi_us or unsanitized_flows
+                            fi["unsanitized_flows"] = "yes" if fi_us else "no"
+                            fi["sanitized_flows"].extend(sanitized_flows)
+                            already_added = True
+
+                    if not already_added:
+                        flow_info = {
+                            'sink': [name, line],
+                            'source': [source, src_line],
+                            'unsanitized_flows': "yes" if unsanitized_flows else "no",
+                            'sanitized_flows': sanitized_flows,
+                            # TODO FIXME: False needs to be the actual logic to have the implicit
+                            'implicit': "yes" if False else "no"
+                        }
+                        self.illegal_flows[pattern_name].append(flow_info)
 
     def get_report(self) -> Dict[str, List[Dict]]:
         """
