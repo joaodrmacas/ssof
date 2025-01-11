@@ -123,10 +123,8 @@ class Label:
                 new_label.source_sanitizers[src_n_line] = copy.deepcopy(
                     sanitizers)
             else:
-                for sanitizer in sanitizers:
-                    if sanitizer not in new_label.source_sanitizers[src_n_line]:
-                        new_label.source_sanitizers[src_n_line].append(
-                            sanitizer)
+                new_label.source_sanitizers[src_n_line].extend(
+                    sanitizers)
 
             merge_empty_flows(new_label.source_sanitizers[src_n_line])
 
