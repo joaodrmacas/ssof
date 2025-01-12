@@ -209,6 +209,8 @@ class ASTAnalyzer:
                         self.vulnerabilites.add_illegal_flows(
                             object_name, get_line(node), arg_mlbl
                         )
+
+                self.vulnerabilites.add_illegal_flows(func_name, get_line(node), self.get_current_pc())
             
 
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
@@ -355,6 +357,7 @@ class ASTAnalyzer:
             object_name = object_node.get("name")
             left_name = f"{object_name}.{prop_name}"
             left_mlbl = copy.deepcopy(right_mlbl)
+            left_mlbl = left_mlbl.combine(pc_mlbl)
 
             # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
             mlbl_ing.add_initialized_vars(left_name)
