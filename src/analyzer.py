@@ -28,6 +28,29 @@ class ASTAnalyzer:
         self.ast = ast
         self.policy = policy
         self.vulnerabilites = vulnerabilities
+        self.pc_stack = []
+
+    def get_current_pc(self) -> MultiLabel:
+        """Get the current security level (combine all labels in the stack)"""
+        if not self.pc_stack:
+            return MultiLabel(list(self.policy.patterns.values()))
+
+        # FIXME: LOGIC
+
+        current_pc = copy.deepcopy(self.pc_stack[0])
+        for label in self.pc_stack[1:]:
+            current_pc = current_pc.combine(label)
+        return current_pc
+
+    def push_pc(self, label: MultiLabel):
+        """Push a new security level onto the pc stack"""
+        self.pc_stack.append(label)
+
+    def pop_pc(self):
+        """Pop the current security level from the pc stack"""
+        if self.pc_stack:
+            return self.pc_stack.pop()
+        return None
 
     def traverse_ast(self, node=None, depth=0):
         """
@@ -54,21 +77,17 @@ class ASTAnalyzer:
             for item in node:
                 self.traverse_ast(item, depth)
 
-    def visit_literal(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ):
+    def visit_literal(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
         """Visit a literal node (numbers, strings, booleans, etc.)"""
         value = node.get("value", "unknown")
         raw = node.get("raw", str(value))
         path.append(" " * depth + f"LITERAL: {raw}")
-        lbl = MultiLabel(list(self.policy.patterns.values()))
+        mlbl = MultiLabel(list(self.policy.patterns.values()))
         # TODO: aqui é value ou raw?
-        lbl.add_source(value, get_line(node))
-        return copy.deepcopy(lbl)
+        mlbl.add_source(value, get_line(node))
+        return copy.deepcopy(mlbl)
 
-    def visit_identifier(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ):
+    def visit_identifier(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
         """Visit an identifier node (variable names)"""
         name = node.get("name", "unknown")
         path.append(" " * depth + f"IDENTIFIER: {name}")
@@ -85,18 +104,14 @@ class ASTAnalyzer:
 
         return mlbl
 
-    def visit_unary_expression(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ):
+    def visit_unary_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
         """Visit a unary expression (e.g., !x, -y)"""
         operator = node.get("operator", "")
         path.append(" " * depth + f"UNARY {operator}")
         argument = node.get("argument", {})
         return copy.deepcopy(self.visit_expression(argument, mlbl_ing, path, depth + 2))
 
-    def visit_binary_expression(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ):
+    def visit_binary_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
         """Visit a binary expression (e.g., x + y, a < b)"""
         operator = node.get("operator", "")
         path.append(" " * depth + f"BINARY {operator}")
@@ -113,9 +128,7 @@ class ASTAnalyzer:
             return copy.deepcopy(right_lbl)
         return copy.deepcopy(left_lbl)
 
-    def visit_call_expression(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ) -> MultiLabel:
+    def visit_call_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
         """Visit a function call expression"""
 
         def get_function_name(callee):
@@ -170,40 +183,36 @@ class ASTAnalyzer:
                     sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
 
                 for pattern_name in vuln_patterns:
-                    for source, src_line in sanitized_mlbl.get_label_for_pattern(
+                    for source, src_line, is_implicit in sanitized_mlbl.get_label_for_pattern(
                         pattern_name
                     ).get_sources():
                         sanitized_mlbl.labels[pattern_name].add_sanitizer(
-                            source, src_line, func_name, get_line(node)
+                            source, src_line, is_implicit, func_name, get_line(node)
                         )
 
                 print("AFTER - SANITIZED LABEL: ", sanitized_mlbl)
 
             # Check if this is a sink call
+
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
             if vuln_patterns:
-                for i, arg_mlbl in enumerate(args_mlbls):
+                for _, arg_mlbl in enumerate(args_mlbls):
                     # Add this sink usage to the vulnerabilities tracking
-                    self.vulnerabilites.add_illegal_flows(
-                        func_name, get_line(node), arg_mlbl
-                    )
+                    self.vulnerabilites.add_illegal_flows(func_name, get_line(node), arg_mlbl)
                     if property_node:
                         self.vulnerabilites.add_illegal_flows(
                             property_node.get("name", "unknown"),
                             get_line(node),
-                            arg_mlbl,
+                            arg_mlbl
                         )
                     if object_name:
                         self.vulnerabilites.add_illegal_flows(
                             object_name, get_line(node), arg_mlbl
                         )
+            
 
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
-        result_lbl = (
-            callee_lbl
-            if callee_lbl
-            else MultiLabel(list(self.policy.patterns.values()))
-        )
+        result_lbl = callee_lbl if callee_lbl else MultiLabel(list(self.policy.patterns.values()))
 
         # If we have a sanitized label, use that instead of combining the raw argument labels
         if sanitized_mlbl:
@@ -216,17 +225,13 @@ class ASTAnalyzer:
         print(f"\n{func_name} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
 
-    def visit_expression_statement(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0
-    ) -> MultiLabelling:
+    def visit_expression_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0) -> MultiLabelling:
         expression = node.get("expression", {})
         path.append(" " * depth + "EXPRESSION")
         self.visit_expression(expression, mlbl_ing, path, depth + 2)
         return copy.deepcopy(mlbl_ing)
 
-    def visit_member_expression(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ) -> MultiLabel:
+    def visit_member_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
         """
         Visit a member access expression (e.g., obj.prop).
         This should behave similarly to visit_identifier, but for 'obj.prop'.
@@ -251,10 +256,7 @@ class ASTAnalyzer:
 
         # 3) Create a "name" for this member expression (similar to how we do in visit_identifier)
         #    For example, if both are Identifiers:
-        if (
-            object_node.get("type") == "Identifier"
-            and property_node.get("type") == "Identifier"
-        ):
+        if object_node.get("type") == "Identifier" and property_node.get("type") == "Identifier":
             full_name = f"{object_node.get('name')}.{property_node.get('name')}"
         else:
             # If object or property are more complex, fallback to something unique
@@ -290,9 +292,7 @@ class ASTAnalyzer:
 
         return copy.deepcopy(new_label)
 
-    def visit_block_statement(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ) -> MultiLabelling:
+    def visit_block_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
         """Visit a block statement (sequence of statements)"""
         body = node.get("body", [])
 
@@ -312,79 +312,83 @@ class ASTAnalyzer:
         right = node.get("right", {})
 
         path.append(" " * depth + f"ASSIGNMENT {operator}")
+        print(f"ASSIGNMENT {left.get('name', left)} {operator} {right.get('name', right.get('raw', right))}")
 
         # Get the label from the right-hand expression
-        right_label = self.visit_expression(right, mlbl_ing, path)
-
-        if not right_label:
+        right_mlbl = self.visit_expression(right, mlbl_ing, path)
+        if not right_mlbl:
             return MultiLabel([])
+
+        pc_mlbl = self.get_current_pc()
 
         # Handle assignment to identifiers
         if isinstance(left, dict) and left.get("type") == "Identifier":
-            left_name = left.get("name")
+            left_name = left.get("name", "unknown")
             mlbl_ing.add_initialized_vars(left_name)
-            if left_name:
-                # Check if the left-hand variable is a sink
-                vuln_patterns = self.policy.get_vulnerabilities_for_sink(left_name)
-                left_label = copy.deepcopy(right_label)
+            left_mlbl = copy.deepcopy(right_mlbl)
+            print(f"ASSIGNMENT LEFT MLBL: ", left_mlbl)
+            print(f"ASSIGNMENT PC MLBL: ", pc_mlbl)
 
-                if vuln_patterns:
-                    # Check for illegal flows to this sink
-                    self.vulnerabilites.add_illegal_flows(
-                        left_name, get_line(node), left_label
-                    )
+            left_mlbl = left_mlbl.combine(pc_mlbl)
 
-                # # Update the variable's label in the multilabelling
-                left_label.add_source(left_name, -1)
-                mlbl_ing.update_label(left_name, left_label)
+            print("ASSIGNMENT LEFT MLBL AFTER IMPLICIT COMBINE: ", left_mlbl)
+
+            # Check if the left-hand variable is a sink
+            vuln_patterns = self.policy.get_vulnerabilities_for_sink(left_name)
+
+            if vuln_patterns:
+                # Check for illegal flows to this sink
+                self.vulnerabilites.add_illegal_flows(left_name, get_line(node), left_mlbl)
+
+            # # Update the variable's label in the multilabelling
+            left_mlbl.add_source(left_name, -1)
+            mlbl_ing.update_label(left_name, left_mlbl)
 
         # Handle assignment to member expressions (e.g., obj.prop = value)
-        # TODO:
         elif isinstance(left, dict) and left.get("type") == "MemberExpression":
             property_node = left.get("property", {})
             object_node = left.get("object", {})
-            if (
-                property_node.get("type") == "Identifier"
-                and object_node.get("type") == "Identifier"
-            ):
-                prop_name = property_node.get("name")
-                object_name = object_node.get("name")
-                left_name = f"{object_name}.{prop_name}"
-                left_label = copy.deepcopy(right_label)
+            if property_node.get("type") != "Identifier" or object_node.get("type") != "Identifier":
+                return MultiLabel(self.policy.patterns.values())
 
-                # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
-                mlbl_ing.add_initialized_vars(left_name)
-                mlbl_ing.add_initialized_vars(prop_name)
+            prop_name = property_node.get("name")
+            object_name = object_node.get("name")
+            left_name = f"{object_name}.{prop_name}"
+            left_mlbl = copy.deepcopy(right_mlbl)
 
-                # Check if full_name OR just object_name OR just prop_name is a sink
-                # (Depending on how you want to handle patterns—some treat `obj.prop`
-                # as the sink, others treat just `prop_name` as a sink, etc.)
-                combined_sinks = (
-                    self.policy.get_vulnerabilities_for_sink(left_name)
-                    | self.policy.get_vulnerabilities_for_sink(prop_name)
-                    | self.policy.get_vulnerabilities_for_sink(object_name)
+            # Mark it as initialized so that future uses of obj.prop won't be treated as entirely uninitialized
+            mlbl_ing.add_initialized_vars(left_name)
+            mlbl_ing.add_initialized_vars(prop_name)
+
+            # Check if full_name OR just object_name OR just prop_name is a sink
+            # (Depending on how you want to handle patterns—some treat `obj.prop`
+            # as the sink, others treat just `prop_name` as a sink, etc.)
+            combined_sinks = (
+                self.policy.get_vulnerabilities_for_sink(left_name)
+                | self.policy.get_vulnerabilities_for_sink(prop_name)
+                | self.policy.get_vulnerabilities_for_sink(object_name)
+            )
+            if combined_sinks:
+                # If any pattern sees this as a sink, record the flows
+                self.vulnerabilites.add_illegal_flows(
+                    object_name,  # or just `prop_name`, whichever you prefer
+                    get_line(node),
+                    left_mlbl
                 )
-                if combined_sinks:
-                    # If any pattern sees this as a sink, record the flows
-                    self.vulnerabilites.add_illegal_flows(
-                        object_name,  # or just `prop_name`, whichever you prefer
-                        get_line(node),
-                        left_label,
-                    )
 
-                    self.vulnerabilites.add_illegal_flows(
-                        prop_name,  # or just `prop_name`, whichever you prefer
-                        get_line(node),
-                        left_label,
-                    )
+                self.vulnerabilites.add_illegal_flows(
+                    prop_name,  # or just `prop_name`, whichever you prefer
+                    get_line(node),
+                    left_mlbl
+                )
 
-                left_label.add_source(left_name, -1)
-                left_label.add_source(object_name, -1)
-                print(f"LEFT LABEL: {left_label}")
-                mlbl_ing.update_label(left_name, left_label)
+            left_mlbl.add_source(left_name, -1)
+            left_mlbl.add_source(object_name, -1)
+            print(f"LEFT LABEL: {left_mlbl}")
+            mlbl_ing.update_label(left_name, left_mlbl)
 
         # FIXME: why return a empty multilabel
-        return copy.deepcopy(MultiLabel([]))
+        return copy.deepcopy(MultiLabel(self.policy.patterns.values()))
 
     def visit_while_statement(
         self,
@@ -394,30 +398,48 @@ class ASTAnalyzer:
         max_repetitions=2,
         depth=0,
     ):
-        condition = node.get("test", {}).get("raw", "condition")
+        condition = node.get("test", {})
+        condition_raw = condition.get("raw", "condition")
+
+        condition_mlbl = self.visit_expression(condition, mlbl_ing, path, depth + 2)
+        condition_mlbl.force_implicit_sources()
+        self.push_pc(condition_mlbl)
+
+        print("### WHILE CONDITION LABEL: ", condition_mlbl)
+
         body = node.get("body", {}).get("body", [])
 
         # label to get the flows of not joining the while
         initial_mlbl_ing = copy.deepcopy(mlbl_ing)
-
-        final_mlbl_ing = copy.deepcopy(mlbl_ing)
+        iter_mlbl_ing = copy.deepcopy(mlbl_ing)
         for i in range(max_repetitions):
-            path.append(" " * depth + f"WHILE ({condition}) iteration {i}")
-            print(f"WHILE ({condition}) iteration {i}")
+            path.append(" " * depth + f"WHILE ({condition_raw}) iteration {i}")
+            print(f"WHILE ({condition_raw}) iteration {i}")
             for statement in body:
                 mlbl_ing = self.visit_statement(statement, mlbl_ing, path, depth + 2)
 
-            print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} before combine")
-            final_mlbl_ing = final_mlbl_ing.combine(mlbl_ing)
-            print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} after combine")
-        path.append(" " * depth + f"EXIT WHILE ({condition})")
-        return copy.deepcopy(mlbl_ing.combine(initial_mlbl_ing))
+            # FIXME : we can do this better (compare the last label with the now label)
 
-    def visit_if_statement(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0
-    ):
-        test = node.get("test", {}).get("raw", "condition")
-        path.append(" " * depth + f"IF ({test})")
+            print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} before combine")
+            iter_mlbl_ing = iter_mlbl_ing.combine(mlbl_ing)
+            print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} after combine")
+
+        self.pop_pc()
+        path.append(" " * depth + f"EXIT WHILE ({condition_raw})")
+        return copy.deepcopy(iter_mlbl_ing.combine(initial_mlbl_ing))
+
+    def visit_if_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List, depth=0):
+        test = node.get("test", {})
+        test_raw = test.get("raw", "condition")
+        path.append(" " * depth + f"IF ({test_raw})")
+
+        # Visit the test condition
+        test_mlbl = self.visit_expression(test, mlbl_ing, path, depth + 2)
+        print("IF TEST LABEL: ", test_mlbl)
+
+        test_mlbl.force_implicit_sources()
+
+        self.push_pc(test_mlbl)
 
         if_ing = copy.deepcopy(mlbl_ing)
         else_ing = copy.deepcopy(mlbl_ing)
@@ -434,6 +456,7 @@ class ASTAnalyzer:
             for statement in alternate:
                 else_ing = self.visit_statement(statement, else_ing, path, depth + 2)
 
+        self.pop_pc()
         path.append(" " * depth + "END IF")
         return copy.deepcopy(if_ing.combine(else_ing))
 
@@ -450,9 +473,7 @@ class ASTAnalyzer:
                 print("NOT A STATEMENT ABORTING")
                 print("NOT A STATEMENT ABORTING")
 
-    def visit_statement(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ) -> MultiLabelling:
+    def visit_statement(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabelling:
         if not isinstance(node, dict):
             print("**** FATAL ERROR ****")
             return copy.deepcopy(mlbl_ing)
@@ -467,16 +488,12 @@ class ASTAnalyzer:
         elif node_type == "IfStatement":
             return self.visit_if_statement(node, mlbl_ing, path, depth)
         elif node_type == "WhileStatement":
-            return self.visit_while_statement(
-                node, mlbl_ing, path, self.MAX_LOOP_DEPTH, depth
-            )
+            return self.visit_while_statement(node, mlbl_ing, path, self.MAX_LOOP_DEPTH, depth)
         else:
             path.append(" " * depth + f"-UNKNOWN NODE TYPE: {node_type}")
             return copy.deepcopy(mlbl_ing)
 
-    def visit_expression(
-        self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0
-    ) -> MultiLabel:
+    def visit_expression(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0) -> MultiLabel:
 
         if not isinstance(node, dict):
             return copy.deepcopy(MultiLabel([]))
