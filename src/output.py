@@ -1,6 +1,5 @@
 import copy
 import json
-from venv import create
 
 from src.classes import Vulnerabilities
 

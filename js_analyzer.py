@@ -47,10 +47,9 @@ def main():
         patterns = load_patterns(pattern_file)
 
         policy = Policy(patterns)
-        multilabelling = MultiLabelling()
         vulnerabilities = Vulnerabilities()
 
-        analyzer = ASTAnalyzer(ast, policy, multilabelling, vulnerabilities)
+        analyzer = ASTAnalyzer(ast, policy, vulnerabilities)
         output = analyzer.trace_execution_paths()
 
         # Write output to file
@@ -59,8 +58,6 @@ def main():
 
     except Exception as e:
         raise e
-        # print(f"Error processing files: {str(e)}")
-        # exit(1)
 
 
 if __name__ == "__main__":

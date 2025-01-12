@@ -2,7 +2,7 @@ import copy
 from dataclasses import dataclass
 from typing import List, Dict
 from src.classes import Policy, MultiLabelling, Vulnerabilities, MultiLabel, Label
-from src.output import *
+from src.output import print_json
 
 
 @dataclass
@@ -22,7 +22,6 @@ class ASTAnalyzer:
         self,
         ast,
         policy: Policy,
-        multilabelling: MultiLabelling,
         vulnerabilities: Vulnerabilities,
     ):
         self.ast = ast
@@ -194,9 +193,13 @@ class ASTAnalyzer:
 
             # Check if this is a sink call
 
+            print(f"INI $$$$$$$$$$$ {func_name} SINK CALL")
+
             vuln_patterns = self.policy.get_vulnerabilities_for_sink(func_name)
             if vuln_patterns:
-                for _, arg_mlbl in enumerate(args_mlbls):
+                for i, arg_mlbl in enumerate(args_mlbls):
+                    print(f"ARG {i} LABEL: ", arg_mlbl)
+
                     # Add this sink usage to the vulnerabilities tracking
                     self.vulnerabilites.add_illegal_flows(func_name, get_line(node), arg_mlbl)
                     if property_node:
@@ -212,6 +215,7 @@ class ASTAnalyzer:
 
                 self.vulnerabilites.add_illegal_flows(func_name, get_line(node), self.get_current_pc())
             
+            print(f"END $$$$$$$$$$$ {func_name} SINK CALL")
 
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
         result_lbl = callee_lbl if callee_lbl else MultiLabel(list(self.policy.patterns.values()))
@@ -325,6 +329,10 @@ class ASTAnalyzer:
 
         # Handle assignment to identifiers
         if isinstance(left, dict) and left.get("type") == "Identifier":
+            if left.get("name") == "a" and get_line(node) == 13:
+                print("******************* INI ASSIGNMENT A AT LINE 13")
+
+
             left_name = left.get("name", "unknown")
             mlbl_ing.add_initialized_vars(left_name)
             left_mlbl = copy.deepcopy(right_mlbl)
@@ -343,8 +351,10 @@ class ASTAnalyzer:
                 self.vulnerabilites.add_illegal_flows(left_name, get_line(node), left_mlbl)
 
             # # Update the variable's label in the multilabelling
-            left_mlbl.add_source(left_name, -1)
             mlbl_ing.update_label(left_name, left_mlbl)
+
+            if left.get("name") == "a" and get_line(node) == 13:
+                print("******************* END ASSIGNMENT A AT LINE 13")
 
         # Handle assignment to member expressions (e.g., obj.prop = value)
         elif isinstance(left, dict) and left.get("type") == "MemberExpression":
@@ -363,35 +373,23 @@ class ASTAnalyzer:
             mlbl_ing.add_initialized_vars(left_name)
             mlbl_ing.add_initialized_vars(prop_name)
 
-            # Check if full_name OR just object_name OR just prop_name is a sink
-            # (Depending on how you want to handle patterns—some treat `obj.prop`
-            # as the sink, others treat just `prop_name` as a sink, etc.)
-            combined_sinks = (
-                self.policy.get_vulnerabilities_for_sink(left_name)
-                | self.policy.get_vulnerabilities_for_sink(prop_name)
-                | self.policy.get_vulnerabilities_for_sink(object_name)
+            # If any pattern sees this as a sink, record the flows
+            self.vulnerabilites.add_illegal_flows(
+                object_name,
+                get_line(node),
+                left_mlbl
             )
-            if combined_sinks:
-                # If any pattern sees this as a sink, record the flows
-                self.vulnerabilites.add_illegal_flows(
-                    object_name,  # or just `prop_name`, whichever you prefer
-                    get_line(node),
-                    left_mlbl
-                )
 
-                self.vulnerabilites.add_illegal_flows(
-                    prop_name,  # or just `prop_name`, whichever you prefer
-                    get_line(node),
-                    left_mlbl
-                )
+            self.vulnerabilites.add_illegal_flows(
+                prop_name,
+                get_line(node),
+                left_mlbl
+            )
 
-            left_mlbl.add_source(left_name, -1)
-            left_mlbl.add_source(object_name, -1)
             print(f"LEFT LABEL: {left_mlbl}")
             mlbl_ing.update_label(left_name, left_mlbl)
 
-        # FIXME: why return a empty multilabel
-        return copy.deepcopy(MultiLabel(self.policy.patterns.values()))
+        return copy.deepcopy(MultiLabel([]))
 
     def visit_while_statement(
         self,
@@ -423,7 +421,6 @@ class ASTAnalyzer:
 
             # FIXME : we can do this better (compare the last label with the now label)
 
-            print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} before combine")
             iter_mlbl_ing = iter_mlbl_ing.combine(mlbl_ing)
             print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} after combine")
 

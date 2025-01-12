@@ -391,28 +391,29 @@ class Vulnerabilities:
             multi_label: MultiLabel containing only the illegal flows to this sink
         """
 
+        if name == "e" and line == 13:
+            print("@@@@ e mlbl: ", multi_label)
+
         for pattern_name, label in multi_label.labels.items():
             pattern = multi_label.patterns.get(pattern_name)
             if not pattern or not pattern.is_sink(name):
                 continue
 
-            processed_label = label
-
-            print(processed_label)
-
-            if not processed_label.get_sources():  # Only process if there are sources
+            if not label.get_sources():  # Only process if there are sources
                 continue
 
             if pattern_name not in self.illegal_flows:
                 self.illegal_flows[pattern_name] = []
 
-            for source, src_line, is_implicit in processed_label.get_sources():
+            for source, src_line, is_implicit in label.get_sources():
                 if not pattern.implicit and is_implicit:
                     continue
 
                 sanitized_flows = copy.deepcopy(
-                    processed_label.get_sanitizers_for_source(source, src_line, is_implicit)
+                    label.get_sanitizers_for_source(source, src_line, is_implicit)
                 )
+                
+                
 
                 unsanitized_flows = False
                 # remove all unsanitized flows
@@ -421,31 +422,23 @@ class Vulnerabilities:
                         sanitized_flows.remove(flow)
                         unsanitized_flows = True
 
-                # FIXME: why do we even have -1 line?
-                if src_line != -1:
-                    already_added = False
-                    for fi in self.illegal_flows[pattern_name]:
-                        if fi["source"] == [source, src_line] and fi["sink"] == [
-                            name,
-                            line,
-                        ]:
-                            fi_us = True if fi["unsanitized_flows"] == "yes" else False
-                            fi_us = fi_us or unsanitized_flows
-                            fi["unsanitized_flows"] = "yes" if fi_us else "no"
-                            fi["sanitized_flows"].extend(sanitized_flows)
-                            already_added = True
-                            break
+                already_added = False
+                for fi in self.illegal_flows[pattern_name]:
+                    if fi["source"] == [source, src_line] and fi["sink"] == [name,line] and str_to_bool(fi["implicit"]) == is_implicit:
+                        fi["unsanitized_flows"] = bool_to_str(str_to_bool(fi["unsanitized_flows"]) or unsanitized_flows)
+                        fi["sanitized_flows"].extend(sanitized_flows)
+                        already_added = True
+                        break
 
-                    if not already_added:
-                        flow_info = {
-                            "sink": [name, line],
-                            "source": [source, src_line],
-                            "unsanitized_flows": "yes" if unsanitized_flows else "no",
-                            "sanitized_flows": sanitized_flows,
-                            # TODO FIXME: False needs to be the actual logic to have the implicit
-                            "implicit": "yes" if is_implicit else "no",
-                        }
-                        self.illegal_flows[pattern_name].append(flow_info)
+                if not already_added:
+                    flow_info = {
+                        "sink": [name, line],
+                        "source": [source, src_line],
+                        "unsanitized_flows": bool_to_str(unsanitized_flows),
+                        "sanitized_flows": sanitized_flows,
+                        "implicit": bool_to_str(is_implicit)
+                    }
+                    self.illegal_flows[pattern_name].append(flow_info)
 
     def get_report(self) -> Dict[str, List[Dict]]:
         """
@@ -464,3 +457,9 @@ class Vulnerabilities:
                 vulnerability["sanitized_flows"] = temp
 
         return copy.deepcopy(self.illegal_flows)
+
+def bool_to_str(b: bool) -> str:
+    return "yes" if b else "no"
+
+def str_to_bool(s: str) -> bool:
+    return s == "yes"
