@@ -7,7 +7,14 @@ class Pattern:
     Represents a security vulnerability pattern with its sources, sanitizers, and sinks.
     """
 
-    def __init__(self, name: str, source_names: List[str], sanitizer_names: List[str], sink_names: List[str], implicit: bool):
+    def __init__(
+        self,
+        name: str,
+        source_names: List[str],
+        sanitizer_names: List[str],
+        sink_names: List[str],
+        implicit: bool,
+    ):
         """
         Initialize a Pattern object.
 
@@ -80,23 +87,32 @@ class Label:
         :param source: The source to which the sanitizer applies.
         :param sanitizer: The sanitizer to be added.
         """
+        print("ADD_SANITIZER:")
         for flow in self.source_sanitizers[(source, src_line)]:
             # FIXME: wrongly dont add sanitizer for the case: sanit(sanit(src))
+            print("flow", flow)
+            print(f"sanitizer {sanitizer} {line}, to add to {source} {src_line} ")
             if [sanitizer, line] not in flow:
+                print("added")
                 flow.append([sanitizer, line])
+            else:
+                print("already added")
 
     def get_sources(self) -> List[Tuple[str, int]]:
         """Return all sources in the label."""
         return list(self.source_sanitizers.keys())
 
-    def get_sanitizers_for_source(self, source: str, line: int) -> List[List[List[Any]]]:
+    def get_sanitizers_for_source(
+        self, source: str, line: int
+    ) -> List[List[List[Any]]]:
         """Return sanitizers applied to a specific source."""
         return copy.deepcopy(self.source_sanitizers[(source, line)])
 
-    def combine(self, other: 'Label') -> 'Label':
+    def combine(self, other: "Label") -> "Label":
         """
         Combine this label with another label, creating a new independent label.
         """
+
         def merge_empty_flows(flows):
             before = copy.deepcopy(flows)
             has_empty_flow = False
@@ -119,11 +135,9 @@ class Label:
         # Add all sources and sanitizers from the other label
         for src_n_line, sanitizers in other.source_sanitizers.items():
             if src_n_line not in new_label.source_sanitizers:
-                new_label.source_sanitizers[src_n_line] = copy.deepcopy(
-                    sanitizers)
+                new_label.source_sanitizers[src_n_line] = copy.deepcopy(sanitizers)
             else:
-                new_label.source_sanitizers[src_n_line].extend(
-                    sanitizers)
+                new_label.source_sanitizers[src_n_line].extend(sanitizers)
 
             merge_empty_flows(new_label.source_sanitizers[src_n_line])
 
@@ -171,14 +185,13 @@ class MultiLabel:
         Only adds to patterns where the source is valid.
         """
         for pattern_name, pattern in self.patterns.items():
-            self.labels[pattern_name].add_sanitizer(
-                source, src_line, sanitizer, line)
+            self.labels[pattern_name].add_sanitizer(source, src_line, sanitizer, line)
 
     def get_label_for_pattern(self, pattern_name: str):
         """Get the Label object for a specific pattern."""
         return self.labels.get(pattern_name)
 
-    def combine(self, other: 'MultiLabel') -> 'MultiLabel':
+    def combine(self, other: "MultiLabel") -> "MultiLabel":
         """
         Combine this MultiLabel with another MultiLabel.
         """
@@ -194,14 +207,20 @@ class MultiLabel:
         for pattern_name in other.patterns:
             if pattern_name not in new_multilabel.patterns:
                 new_multilabel.patterns[pattern_name] = copy.deepcopy(
-                    other.labels[pattern_name])
+                    other.labels[pattern_name]
+                )
 
         return new_multilabel
 
     def __str__(self):
-        return f"MultiLabel(patterns={list(self.patterns.keys())}, labels={{" + \
-            ", ".join(f"{pattern_name}: {label}" for pattern_name,
-                      label in self.labels.items()) + "})"
+        return (
+            f"MultiLabel(patterns={list(self.patterns.keys())}, labels={{"
+            + ", ".join(
+                f"{pattern_name}: {label}"
+                for pattern_name, label in self.labels.items()
+            )
+            + "})"
+        )
 
 
 class Policy:
@@ -298,7 +317,7 @@ class MultiLabelling:
 
     def __init__(self):
         """
-        Initialize a MultiLabelling object.        
+        Initialize a MultiLabelling object.
         """
         self.labelling: Dict[str, MultiLabel] = {}
         self.initialized_vars = set()
@@ -330,7 +349,7 @@ class MultiLabelling:
         """
         self.labelling[name] = multi_label
 
-    def combine(self, other: 'MultiLabelling') -> 'MultiLabelling':
+    def combine(self, other: "MultiLabelling") -> "MultiLabelling":
         """
         Combine two multilabellings into a new one where labels reflect
         the possible outcomes of either multilabelling.
@@ -351,19 +370,17 @@ class MultiLabelling:
 
             if label_self and label_other:
                 # If both exist, combine their MultiLabels
-                combined_labelling.update_label(
-                    name, label_self.combine(label_other))
+                combined_labelling.update_label(name, label_self.combine(label_other))
             elif label_self:
                 # If only in self, copy it
-                combined_labelling.update_label(
-                    name, copy.deepcopy(label_self))
+                combined_labelling.update_label(name, copy.deepcopy(label_self))
             elif label_other:
                 # If only in other, copy it
-                combined_labelling.update_label(
-                    name, copy.deepcopy(label_other))
+                combined_labelling.update_label(name, copy.deepcopy(label_other))
 
         combined_labelling.initialized_vars = self.initialized_vars.intersection(
-            other.initialized_vars)
+            other.initialized_vars
+        )
 
         return combined_labelling
 
@@ -402,14 +419,15 @@ class Vulnerabilities:
                 continue
 
             if not label.get_sources():  # Only process if there are sources
-                return
+                continue
 
             if pattern_name not in self.illegal_flows:
                 self.illegal_flows[pattern_name] = []
 
             for source, src_line in label.get_sources():
                 sanitized_flows = copy.deepcopy(
-                    label.get_sanitizers_for_source(source, src_line))
+                    label.get_sanitizers_for_source(source, src_line)
+                )
 
                 unsanitized_flows = False
                 # remove all unsanitized flows
@@ -422,7 +440,10 @@ class Vulnerabilities:
                 if src_line != -1:
                     already_added = False
                     for fi in self.illegal_flows[pattern_name]:
-                        if fi["source"] == [source, src_line] and fi["sink"] == [name, line]:
+                        if fi["source"] == [source, src_line] and fi["sink"] == [
+                            name,
+                            line,
+                        ]:
                             fi_us = True if fi["unsanitized_flows"] == "yes" else False
                             fi_us = fi_us or unsanitized_flows
                             fi["unsanitized_flows"] = "yes" if fi_us else "no"
@@ -431,12 +452,12 @@ class Vulnerabilities:
 
                     if not already_added:
                         flow_info = {
-                            'sink': [name, line],
-                            'source': [source, src_line],
-                            'unsanitized_flows': "yes" if unsanitized_flows else "no",
-                            'sanitized_flows': sanitized_flows,
+                            "sink": [name, line],
+                            "source": [source, src_line],
+                            "unsanitized_flows": "yes" if unsanitized_flows else "no",
+                            "sanitized_flows": sanitized_flows,
                             # TODO FIXME: False needs to be the actual logic to have the implicit
-                            'implicit': "yes" if False else "no"
+                            "implicit": "yes" if False else "no",
                         }
                         self.illegal_flows[pattern_name].append(flow_info)
 
@@ -447,5 +468,13 @@ class Vulnerabilities:
         Returns:
             Dictionary mapping vulnerability names to lists of flow information
         """
+        for _, pattern in self.illegal_flows.items():
+            for vulnerability in pattern:
+                # Remove duplicates from sanitized flows
+                temp = []
+                for san_flow in vulnerability["sanitized_flows"]:
+                    if san_flow not in temp:
+                        temp.append(san_flow)
+                vulnerability["sanitized_flows"] = temp
 
         return copy.deepcopy(self.illegal_flows)
