@@ -437,7 +437,8 @@ class Vulnerabilities:
                 print(self.flows_to_str())
 
                 for fi in self.illegal_flows[pattern_name]:
-                    if fi["source"] == [source, src_line] and fi["sink"] == [name,line] and str_to_bool(fi["implicit"]) == is_implicit:
+                    if fi["source"] == [source, src_line] and fi["sink"] == [name,line]:
+                        fi["implicit"] = bool_to_str(str_to_bool(fi["implicit"]) or is_implicit)
                         fi["unsanitized_flows"] = bool_to_str(str_to_bool(fi["unsanitized_flows"]) or unsanitized_flows)
                         for flow in sanitized_flows:
                             if flow not in fi["sanitized_flows"]:
