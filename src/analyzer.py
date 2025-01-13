@@ -181,6 +181,8 @@ class ASTAnalyzer:
                 for arg_mlbl in args_mlbls:
                     sanitized_mlbl = sanitized_mlbl.combine(arg_mlbl)
 
+                sanitized_mlbl = sanitized_mlbl.combine(self.get_current_pc())
+
                 for pattern_name in vuln_patterns:
                     for source, src_line, is_implicit in sanitized_mlbl.get_label_for_pattern(
                         pattern_name
@@ -204,17 +206,13 @@ class ASTAnalyzer:
                     self.vulnerabilites.add_illegal_flows(func_name, get_line(node), arg_mlbl)
                     if property_node:
                         self.vulnerabilites.add_illegal_flows(
-                            property_node.get("name", "unknown"),
-                            get_line(node),
-                            arg_mlbl
+                            property_node.get("name", "unknown"), get_line(node), arg_mlbl
                         )
                     if object_name:
-                        self.vulnerabilites.add_illegal_flows(
-                            object_name, get_line(node), arg_mlbl
-                        )
+                        self.vulnerabilites.add_illegal_flows(object_name, get_line(node), arg_mlbl)
 
                 self.vulnerabilites.add_illegal_flows(func_name, get_line(node), self.get_current_pc())
-            
+
             print(f"END $$$$$$$$$$$ {func_name} SINK CALL")
 
         # For non-sanitizer function calls or after sanitization, combine all labels (callee + args)
@@ -227,6 +225,8 @@ class ASTAnalyzer:
             # Otherwise combine with the original argument labels
             for arg_lbl in args_mlbls:
                 result_lbl = result_lbl.combine(arg_lbl)
+
+        # result_lbl = result_lbl.combine(self.get_current_pc())
 
         print(f"\n{func_name} : RETURN VISIT CALL : {result_lbl}")
         return copy.deepcopy(result_lbl)
@@ -332,7 +332,6 @@ class ASTAnalyzer:
             if left.get("name") == "a" and get_line(node) == 13:
                 print("******************* INI ASSIGNMENT A AT LINE 13")
 
-
             left_name = left.get("name", "unknown")
             mlbl_ing.add_initialized_vars(left_name)
             left_mlbl = copy.deepcopy(right_mlbl)
@@ -374,17 +373,9 @@ class ASTAnalyzer:
             mlbl_ing.add_initialized_vars(prop_name)
 
             # If any pattern sees this as a sink, record the flows
-            self.vulnerabilites.add_illegal_flows(
-                object_name,
-                get_line(node),
-                left_mlbl
-            )
+            self.vulnerabilites.add_illegal_flows(object_name, get_line(node), left_mlbl)
 
-            self.vulnerabilites.add_illegal_flows(
-                prop_name,
-                get_line(node),
-                left_mlbl
-            )
+            self.vulnerabilites.add_illegal_flows(prop_name, get_line(node), left_mlbl)
 
             print(f"LEFT LABEL: {left_mlbl}")
             mlbl_ing.update_label(left_name, left_mlbl)
@@ -402,29 +393,28 @@ class ASTAnalyzer:
         condition = node.get("test", {})
         condition_raw = condition.get("raw", "condition")
 
-        condition_mlbl = self.visit_expression(condition, mlbl_ing, path, depth + 2)
-        condition_mlbl.force_implicit_sources()
-        self.push_pc(condition_mlbl)
-
-        print("### WHILE CONDITION LABEL: ", condition_mlbl)
-
-        body = node.get("body", {}).get("body", [])
-
-        # label to get the flows of not joining the while
         initial_mlbl_ing = copy.deepcopy(mlbl_ing)
         iter_mlbl_ing = copy.deepcopy(mlbl_ing)
         for i in range(max_repetitions):
+            condition_mlbl = self.visit_expression(condition, iter_mlbl_ing, path, depth + 2)
+            condition_mlbl.force_implicit_sources()
+            self.push_pc(condition_mlbl)
+
+            print("### WHILE CONDITION LABEL: ", condition_mlbl)
+
+            body = node.get("body", {}).get("body", [])
+
+            # label to get the flows of not joining the while
             path.append(" " * depth + f"WHILE ({condition_raw}) iteration {i}")
             print(f"WHILE ({condition_raw}) iteration {i}")
             for statement in body:
-                mlbl_ing = self.visit_statement(statement, mlbl_ing, path, depth + 2)
+                iter_mlbl_ing = iter_mlbl_ing.combine(self.visit_statement(statement, iter_mlbl_ing, path, depth + 2))
 
             # FIXME : we can do this better (compare the last label with the now label)
-
-            iter_mlbl_ing = iter_mlbl_ing.combine(mlbl_ing)
             print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} after combine")
 
-        self.pop_pc()
+        for i in range(max_repetitions):
+            self.pop_pc()
         path.append(" " * depth + f"EXIT WHILE ({condition_raw})")
         return copy.deepcopy(iter_mlbl_ing.combine(initial_mlbl_ing))
 

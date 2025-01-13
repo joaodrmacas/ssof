@@ -45,7 +45,30 @@
             15
         ],
         "unsanitized_flows": "yes",
-        "sanitized_flows": [],
+        "sanitized_flows": [
+            [
+                [
+                    "s",
+                    5
+                ]
+            ],
+            [
+                [
+                    "s",
+                    13
+                ]
+            ],
+            [
+                [
+                    "s",
+                    13
+                ],
+                [
+                    "s",
+                    5
+                ]
+            ]
+        ],
         "implicit": "yes"
     },
     {
