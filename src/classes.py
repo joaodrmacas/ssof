@@ -408,27 +408,59 @@ class Vulnerabilities:
             for source, src_line, is_implicit in label.get_sources():
                 if not pattern.implicit and is_implicit:
                     continue
-
-                sanitized_flows = copy.deepcopy(
-                    label.get_sanitizers_for_source(source, src_line, is_implicit)
-                )
-                
                 
 
+                print("SANITIZED BEFORE: ", label.get_sanitizers_for_source(source, src_line, is_implicit))
                 unsanitized_flows = False
+                sanitized_flows = []
                 # remove all unsanitized flows
-                for flow in sanitized_flows:
+                for flow in label.get_sanitizers_for_source(source, src_line, is_implicit):
                     if not flow:
-                        sanitized_flows.remove(flow)
                         unsanitized_flows = True
+                    elif flow not in sanitized_flows:
+                        sanitized_flows.append(flow)
+                print("SANITIZED AFTER: ", sanitized_flows)
 
                 already_added = False
+
+                _flow_info_ = {
+                        "sink": [name, line],
+                        "source": [source, src_line],
+                        "unsanitized_flows": bool_to_str(unsanitized_flows),
+                        "sanitized_flows": sanitized_flows,
+                        "implicit": bool_to_str(is_implicit)
+                    }
+                
+                print("\n\n====================================")
+                print("Flow to add: ", _flow_info_)
+                print("BEFORE")
+                print(self.flows_to_str())
+
                 for fi in self.illegal_flows[pattern_name]:
                     if fi["source"] == [source, src_line] and fi["sink"] == [name,line] and str_to_bool(fi["implicit"]) == is_implicit:
                         fi["unsanitized_flows"] = bool_to_str(str_to_bool(fi["unsanitized_flows"]) or unsanitized_flows)
-                        fi["sanitized_flows"].extend(sanitized_flows)
+                        for flow in sanitized_flows:
+                            if flow not in fi["sanitized_flows"]:
+                                fi["sanitized_flows"].append(flow)
                         already_added = True
                         break
+                    # if str_to_bool(fi["implicit"]) == is_implicit and fi["source"] == [source, src_line] and fi["sink"][0] == name:
+                    #     print("HERE - 1")
+                    #     if fi["sink"][1] == line:
+                    #         print("HERE - 2")
+                    #         fi["unsanitized_flows"] = bool_to_str(str_to_bool(fi["unsanitized_flows"]) or unsanitized_flows)
+                    #         for flow in sanitized_flows:
+                    #             if flow not in fi["sanitized_flows"]:
+                    #                 fi["sanitized_flows"].append(flow)
+                    #         already_added = True
+                    #         break
+
+                    #     # elif fi["sink"][1] < line and str_to_bool(fi["unsanitized_flows"]) == unsanitized_flows and fi["sanitized_flows"] == sanitized_flows:
+                    #     elif fi["sink"][1] < line:
+                    #         already_added = True
+                    #         break
+                    #     print(F"HERE - 3 | already:{fi["sink"][1]} | mine:{line}")
+                        
 
                 if not already_added:
                     flow_info = {
@@ -440,6 +472,19 @@ class Vulnerabilities:
                     }
                     self.illegal_flows[pattern_name].append(flow_info)
 
+                print("AFTER")
+                print(self.flows_to_str())
+                print("====================================\n\n")
+
+    def flows_to_str(self):
+        s = "Illegal flows:\n"
+        for pattern_name, flows in self.illegal_flows.items():
+            s += f"  {pattern_name}:\n"
+            for flow in flows:
+                s += f"    {flow}\n"
+        return s[:-1]
+
+
     def get_report(self) -> Dict[str, List[Dict]]:
         """
         Get a report of all recorded illegal flows.
@@ -447,14 +492,6 @@ class Vulnerabilities:
         Returns:
             Dictionary mapping vulnerability names to lists of flow information
         """
-        for _, pattern in self.illegal_flows.items():
-            for vulnerability in pattern:
-                # Remove duplicates from sanitized flows
-                temp = []
-                for san_flow in vulnerability["sanitized_flows"]:
-                    if san_flow not in temp:
-                        temp.append(san_flow)
-                vulnerability["sanitized_flows"] = temp
 
         return copy.deepcopy(self.illegal_flows)
 

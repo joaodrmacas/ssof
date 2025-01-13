@@ -15,3 +15,7 @@ while (a != "") {
 z(0, i);
 
 // tip: implicit flows can come from any of the nested conditions/loops
+
+
+// sink = src
+// sink = sanit(sink)
