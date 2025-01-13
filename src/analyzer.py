@@ -32,18 +32,16 @@ class ASTAnalyzer:
     def get_current_pc(self) -> MultiLabel:
         """Get the current security level (combine all labels in the stack)"""
         if not self.pc_stack:
-            return MultiLabel(list(self.policy.patterns.values()))
+            return MultiLabel([])
 
-        # FIXME: LOGIC
-
-        current_pc = copy.deepcopy(self.pc_stack[0])
-        for label in self.pc_stack[1:]:
-            current_pc = current_pc.combine(label)
-        return current_pc
+        return copy.deepcopy(self.pc_stack[-1])
 
     def push_pc(self, label: MultiLabel):
         """Push a new security level onto the pc stack"""
-        self.pc_stack.append(label)
+        if not self.pc_stack:
+            self.pc_stack.append(label)
+        else:
+            self.pc_stack.append(copy.deepcopy(self.pc_stack[-1].combine(label)))
 
     def pop_pc(self):
         """Pop the current security level from the pc stack"""
@@ -82,8 +80,7 @@ class ASTAnalyzer:
         raw = node.get("raw", str(value))
         path.append(" " * depth + f"LITERAL: {raw}")
         mlbl = MultiLabel(list(self.policy.patterns.values()))
-        # TODO: aqui é value ou raw?
-        mlbl.add_source(value, get_line(node))
+        mlbl.add_source(raw, get_line(node))
         return copy.deepcopy(mlbl)
 
     def visit_identifier(self, node: Dict, mlbl_ing: MultiLabelling, path: List[str], depth=0):
@@ -410,7 +407,6 @@ class ASTAnalyzer:
             for statement in body:
                 iter_mlbl_ing = iter_mlbl_ing.combine(self.visit_statement(statement, iter_mlbl_ing, path, depth + 2))
 
-            # FIXME : we can do this better (compare the last label with the now label)
             print(f"ITERATION {i} - FINAL LABEL: {mlbl_ing} after combine")
 
         for i in range(max_repetitions):

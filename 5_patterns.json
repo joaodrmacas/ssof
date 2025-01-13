@@ -1,0 +1,37 @@
+[
+    {
+        "vulnerability": "SQL Injection",
+        "sources": ["req.query", "req.body", "req.params"],
+        "sanitizers": ["mysql.escape", "pg.escape"],
+        "sinks": ["db.query", "db.execute"],
+        "implicit": "no"
+    },
+    {
+        "vulnerability": "Reflected XSS",
+        "sources": ["req.query", "req.body"],
+        "sanitizers": ["sanitize-html", "escapeHTML"],
+        "sinks": ["res.send", "res.render", "innerHTML"],
+        "implicit": "no"
+    },
+    {
+        "vulnerability": "JWT Token Manipulation",
+        "sources": ["req.headers.authorization", "localStorage.getItem", "sessionStorage.getItem", "cookie.token"],
+        "sanitizers": ["jwt.verify", "validateToken", "checkSignature"],
+        "sinks": ["jwt.decode", "token.payload", "verifyToken", "authorization.validate", "auth.process"],
+        "implicit": "yes"
+    },
+    {
+        "vulnerability": "Open Redirect",
+        "sources": ["req.query.redirect", "req.params.redirect"],
+        "sanitizers": ["validateUrl", "sanitizeUrl"],
+        "sinks": ["res.redirect"],
+        "implicit": "no"
+    },
+    {
+        "vulnerability": "NoSQL Injection",
+        "sources": ["req.body", "req.query", "req.params", "req.cookies"],
+        "sanitizers": ["mongoose.escape", "mongodb.escape", "validateQuery"],
+        "sinks": ["collection.find", "collection.findOne", "collection.update", "collection.delete", "Model.findById"],
+        "implicit": "no"
+    }
+]

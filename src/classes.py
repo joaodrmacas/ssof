@@ -85,7 +85,6 @@ class Label:
         :param sanitizer: The sanitizer to be added.
         """
         for flow in self.source_sanitizers[(source, src_line, is_implicit)]:
-            # FIXME: wrongly dont add sanitizer for the case: sanit(sanit(src))
             if [sanitizer, line] not in flow:
                 flow.append([sanitizer, line])
 
@@ -195,15 +194,20 @@ class MultiLabel:
         Combine this MultiLabel with another MultiLabel.
         """
         # Create new MultiLabel with same patterns
-        new_multilabel = MultiLabel(list(self.patterns.values()))
+        new_multilabel = MultiLabel([])
 
         # Combine labels for each pattern
         for pattern_name in self.patterns:
-            new_multilabel.labels[pattern_name] = self.labels[pattern_name].combine(other.labels[pattern_name])
-
+            new_multilabel.patterns[pattern_name] = self.patterns[pattern_name]
+            if pattern_name in other.patterns:
+                new_multilabel.labels[pattern_name] = self.labels[pattern_name].combine(other.labels[pattern_name])
+            else:
+                new_multilabel.labels[pattern_name] = copy.deepcopy(self.labels[pattern_name])
+        
         for pattern_name in other.patterns:
             if pattern_name not in new_multilabel.patterns:
-                new_multilabel.patterns[pattern_name] = copy.deepcopy(other.labels[pattern_name])
+                new_multilabel.patterns[pattern_name] = other.patterns[pattern_name]
+                new_multilabel.labels[pattern_name] = copy.deepcopy(other.labels[pattern_name])
 
         return new_multilabel
 
