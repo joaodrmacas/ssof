@@ -41,7 +41,7 @@ def run_tests(max_slice=-1):
                 expected_output_file = os.path.join(
                     slice_path, f"{base_name}.output.json")
                 actual_output_file = os.path.join(
-                    output_dir, f"{base_name}.actual.json")
+                    output_dir, f"{base_name}.output.json")
 
                 if not os.path.exists(patterns_file):
                     print(f"Skipping {js_file}: Patterns file not found.")
@@ -54,7 +54,7 @@ def run_tests(max_slice=-1):
 
                 # Run the program
                 command = [
-                    "python3", "js_analyzer.py", js_file, patterns_file
+                    "python3", "js_analyser.py", js_file, patterns_file
                 ]
                 print("\n\n" + "#" * 80)
                 print(f"{bcolors.PURPLE}[NEW TEST]{bcolors.ENDC} Running: {' '.join(command)}")
@@ -89,7 +89,7 @@ def run_common_tests(test_name):
             expected_output_file = os.path.join(
                 test_dir, f"{base_name}.output.json")
             actual_output_file = os.path.join(
-                output_dir, f"{base_name}.actual.json")
+                output_dir, f"{base_name}.output.json")
 
             if not os.path.exists(patterns_file):
                 print(f"Skipping {js_file}: Patterns file not found.")
@@ -102,7 +102,7 @@ def run_common_tests(test_name):
 
             # Run the program
             command = [
-                "python3", "js_analyzer.py", js_file, patterns_file
+                "python3", "js_analyser.py", js_file, patterns_file
             ]
             print("\n\n" + "#" * 80)
             print(f"{bcolors.PURPLE}[NEW TEST]{bcolors.ENDC} Running: {' '.join(command)}")

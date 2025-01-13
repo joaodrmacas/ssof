@@ -35,12 +35,12 @@ def main():
     # Generate output filename
     js_filename = os.path.basename(js_file)
     output_file = os.path.join(
-        output_dir, f"{os.path.splitext(js_filename)[0]}.actual.json")
+        output_dir, f"{os.path.splitext(js_filename)[0]}.output.json")
 
     try:
         # Parse JavaScript file
         ast = parse_javascript(js_file)
-        with open(output_file.replace("actual", "ast"), "w") as f:
+        with open(output_file.replace("output.json", "ast.json"), "w") as f:
             json.dump(ast, f, indent=4)
 
         # Load patterns
